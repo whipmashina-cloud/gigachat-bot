@@ -41,14 +41,15 @@ def search_in_sheet(query_text, warehouse_filter="all"):
             url = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/export?format=csv&gid={g}"
             response = requests.get(url, timeout=10)
             if response.status_code == 200:
-                reader = csv.reader(io.StringIO(response.text))
-                rows = list(reader)
-                all_rows.extend(rows)
+                reader = csv.reader(io.StringIO(response.content.decode('utf-8-sig', errors='ignore')))
+                for row in reader:
+                    if row:
+                        all_rows.append(row)
                 
         if not all_rows:
-            return ""
+            return "Таблица пуста."
             
-        if query_text and len(query_text.strip()) > 1:
+        if query_text and len(query_text.strip()) > 0:
             query_words = [w.lower().strip() for w in query_text.split() if len(w) > 1]
             if not query_words:
                 query_words = [query_text.lower().strip()]
@@ -59,14 +60,12 @@ def search_in_sheet(query_text, warehouse_filter="all"):
                 if any(w in row_str for w in query_words):
                     if row not in matched_rows:
                         matched_rows.append(row)
-            top_rows = matched_rows[:15]
+            
+            top_rows = matched_rows[:20] if matched_rows else all_rows[:25]
         else:
-            top_rows = all_rows[:15]
+            top_rows = all_rows[:25]
             
-        if not top_rows:
-            return "Совпадений в базе не найдено."
-            
-        result_text = "Данные из базы предприятия:\n"
+        result_text = "Данные из таблиц базы предприятия:\n"
         for r in top_rows:
             clean_cells = [cell.strip() for cell in r if cell.strip()]
             if clean_cells:
@@ -75,7 +74,7 @@ def search_in_sheet(query_text, warehouse_filter="all"):
         return result_text
     except Exception as e:
         print(f"Error reading sheets: {e}")
-        return ""
+        return "Ошибка чтения таблиц."
 
 def upload_image_to_gigachat(token, image_bytes):
     url = "https://gigachat.devices.sberbank.ru/api/v1/files"
@@ -117,13 +116,13 @@ def ask_gigachat(prompt, sheet_context, image_file_id=None, warehouse="all"):
     selected_wh = wh_names.get(warehouse, "Все базы")
 
     system_prompt = (
-        f"Ты главный инженер по складской логистике. База: '{selected_wh}'. "
-        "Проанализируй запрос и данные из таблиц. Если прикреплено фото, найди совпадение с позициями базы. "
-        "Отвечай кратко, человеческим языком, без палочек (|) и технических символов. Только суть."
+        f"Ты голосовой складской помощник. База данных: '{selected_wh}'. "
+        "Ниже переданы данные из таблиц. Найди в них точное соответствие запросу пользователя или изображению. "
+        "Отвечай максимально кратко, разговорным языком (так как ответ будет зачитываться вслух голосом), без палочек (|) и технических символов. Называй наименование, артикул, место и статус."
     )
     
     combined_context = sheet_context if sheet_context else ""
-    user_text = f"{combined_context}\nЗапрос пользователя: {prompt if prompt else 'Найди позицию по фото в базе.'}"
+    user_text = f"{combined_context}\nЗапрос пользователя: {prompt if prompt else 'Найди позицию по фото в базе данных.'}"
 
     user_message = {"role": "user", "content": user_text}
     if image_file_id:
@@ -136,7 +135,7 @@ def ask_gigachat(prompt, sheet_context, image_file_id=None, warehouse="all"):
             user_message
         ],
         "temperature": 0.1,
-        "max_tokens": 600
+        "max_tokens": 400
     }
     
     try:
@@ -145,9 +144,9 @@ def ask_gigachat(prompt, sheet_context, image_file_id=None, warehouse="all"):
         if 'choices' in res_data and len(res_data['choices']) > 0:
             return res_data['choices'][0]['message']['content']
         else:
-            return f"Ошибка ответа GigaChat."
+            return "Не удалось получить ответ от ИИ."
     except requests.exceptions.Timeout:
-        return "Превышено время ожидания ответа от ИИ. Попробуйте отправить запрос еще раз."
+        return "Превышено время ожидания ответа. Попробуйте еще раз."
     except Exception as e:
         return f"Ошибка запроса: {str(e)}"
 
@@ -159,7 +158,7 @@ CHAT_TEMPLATE = """
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <link rel="manifest" href="/manifest.json">
     <meta name="theme-color" content="#0f172a">
-    <title>Склад AI</title>
+    <title>Склад AI — Голосовой помощник</title>
     <style>
         :root {
             --bg-primary: #0f172a;
@@ -171,6 +170,7 @@ CHAT_TEMPLATE = """
             --user-bubble: #1e3a8a;
             --bot-bubble: #1e293b;
             --border: #334155;
+            --red-glow: #ef4444;
         }
 
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -210,6 +210,7 @@ CHAT_TEMPLATE = """
             max-width: 88%; padding: 14px 18px; border-radius: 18px;
             font-size: 15px; line-height: 1.5; word-break: break-word; white-space: pre-wrap;
             animation: fadeIn 0.25s ease-out forwards;
+            display: flex; flex-direction: column; gap: 8px;
         }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
 
@@ -222,6 +223,13 @@ CHAT_TEMPLATE = """
             border-bottom-left-radius: 4px; border: 1px solid var(--border);
             box-shadow: 0 4px 12px rgba(0,0,0,0.2);
         }
+
+        .tts-btn {
+            background: rgba(56, 189, 248, 0.1); border: 1px solid var(--border);
+            color: var(--accent); border-radius: 8px; padding: 4px 10px; font-size: 12px;
+            cursor: pointer; align-self: flex-start; display: flex; align-items: center; gap: 4px;
+        }
+        .tts-btn:active { background: rgba(56, 189, 248, 0.3); }
 
         .quick-actions {
             display: flex; gap: 8px; overflow-x: auto; padding: 8px 16px;
@@ -246,15 +254,22 @@ CHAT_TEMPLATE = """
 
         #input-form {
             background: var(--bg-secondary); padding: 10px 14px;
-            display: flex; gap: 10px; align-items: center; border-top: 1px solid var(--border);
+            display: flex; gap: 8px; align-items: center; border-top: 1px solid var(--border);
         }
         .icon-btn {
             background: rgba(255,255,255,0.05); border: 1px solid var(--border);
             border-radius: 12px; width: 44px; height: 44px;
             display: flex; align-items: center; justify-content: center;
-            cursor: pointer; font-size: 20px; color: var(--text-main); transition: 0.2s;
+            cursor: pointer; font-size: 20px; color: var(--text-main); transition: 0.2s; flex-shrink: 0;
         }
         .icon-btn:active { transform: scale(0.92); background: rgba(255,255,255,0.1); }
+        
+        #micBtn.listening {
+            background: var(--red-glow); border-color: #f87171;
+            animation: micPulse 1.2s infinite;
+        }
+        @keyframes micPulse { 0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); } 70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); } 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); } }
+
         input[type="file"] { display: none; }
 
         input[type="text"] {
@@ -267,7 +282,7 @@ CHAT_TEMPLATE = """
             background: var(--accent-gradient); border: none; color: white;
             border-radius: 14px; width: 44px; height: 44px; font-size: 18px;
             display: flex; align-items: center; justify-content: center; cursor: pointer;
-            box-shadow: 0 0 10px rgba(56, 189, 248, 0.3);
+            box-shadow: 0 0 10px rgba(56, 189, 248, 0.3); flex-shrink: 0;
         }
         .send-btn:active { transform: scale(0.92); }
 
@@ -280,8 +295,8 @@ CHAT_TEMPLATE = """
     <header>
         <div class="header-top">
             <div class="logo-box">
-                <div class="logo-icon">📦</div>
-                <span>Склад AI</span>
+                <div class="logo-icon">🎙️</div>
+                <span>Склад AI (Голос)</span>
             </div>
             <span style="font-size: 12px; color: #4ade80;">● Онлайн</span>
         </div>
@@ -300,7 +315,9 @@ CHAT_TEMPLATE = """
     </header>
 
     <div id="chat-container">
-        <div class="message bot">👋 Приветствую! Отправьте текстовый запрос или фото для поиска.</div>
+        <div class="message bot">
+            👋 Приветствую! Нажмите на значок микрофона (🎤), чтобы сделать голосовой запрос, или введите текст.
+        </div>
     </div>
 
     <div class="quick-actions">
@@ -319,13 +336,74 @@ CHAT_TEMPLATE = """
         <label class="icon-btn" title="Сделать фото">
             📷 <input type="file" id="imageInput" accept="image/*" onchange="handleImageSelect(event)">
         </label>
-        <input type="text" id="messageInput" placeholder="Артикул, название или фото..." autocomplete="off">
+        <div class="icon-btn" id="micBtn" title="Говорить голосом" onclick="toggleSpeechRecognition()">🎤</div>
+        <input type="text" id="messageInput" placeholder="Артикул, название или голос..." autocomplete="off">
         <button type="submit" class="send-btn">➔</button>
     </form>
 
     <script>
         if ('serviceWorker' in navigator) {
             navigator.serviceWorker.register('/sw.js');
+        }
+
+        let recognition = null;
+        let isListening = false;
+
+        if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            recognition = new SpeechRecognition();
+            recognition.lang = 'ru-RU';
+            recognition.interimResults = false;
+            recognition.maxAlternatives = 1;
+
+            recognition.onstart = function() {
+                isListening = true;
+                document.getElementById('micBtn').classList.add('listening');
+                document.getElementById('messageInput').placeholder = "Слушаю вас...";
+            };
+
+            recognition.onresult = function(event) {
+                const speechResult = event.results[0][0].transcript;
+                document.getElementById('messageInput').value = speechResult;
+                stopSpeechRecognition();
+                sendMessage(new Event('submit'));
+            };
+
+            recognition.onerror = function(event) {
+                stopSpeechRecognition();
+            };
+
+            recognition.onend = function() {
+                stopSpeechRecognition();
+            };
+        }
+
+        function toggleSpeechRecognition() {
+            if (!recognition) {
+                alert("Ваш браузер не поддерживает голосовой ввод. Попробуйте Google Chrome.");
+                return;
+            }
+            if (isListening) {
+                recognition.stop();
+            } else {
+                recognition.start();
+            }
+        }
+
+        function stopSpeechRecognition() {
+            isListening = false;
+            document.getElementById('micBtn').classList.remove('listening');
+            document.getElementById('messageInput').placeholder = "Артикул, название или голос...";
+        }
+
+        function speakText(text) {
+            if ('speechSynthesis' in window) {
+                window.speechSynthesis.cancel(); // Остановка предыдущей озвучки
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.lang = 'ru-RU';
+                utterance.rate = 1.0; // Скорость речи
+                window.speechSynthesis.speak(utterance);
+            }
         }
 
         function handleImageSelect(e) {
@@ -381,7 +459,7 @@ CHAT_TEMPLATE = """
 
             const loadDiv = document.createElement('div');
             loadDiv.className = 'message bot';
-            loadDiv.innerHTML = '<span class="loading-pulse">⚡ Обрабатываю запрос...</span>';
+            loadDiv.innerHTML = '<span class="loading-pulse">⚡ Ищу в базе...</span>';
             container.appendChild(loadDiv);
             container.scrollTop = container.scrollHeight;
 
@@ -393,8 +471,23 @@ CHAT_TEMPLATE = """
 
                 const botDiv = document.createElement('div');
                 botDiv.className = 'message bot';
-                botDiv.innerText = data.reply;
+                
+                const textNode = document.createElement('div');
+                textNode.innerText = data.reply;
+                botDiv.appendChild(textNode);
+
+                // Кнопка для повторного озвучивания голосом
+                const speakBtn = document.createElement('button');
+                speakBtn.className = 'tts-btn';
+                speakBtn.innerHTML = '🔊 Прослушать голосом';
+                speakBtn.onclick = () => speakText(data.reply);
+                botDiv.appendChild(speakBtn);
+
                 container.appendChild(botDiv);
+
+                // Автоматически озвучиваем ответ голосом
+                speakText(data.reply);
+
             } catch (err) {
                 loadDiv.remove();
                 const errDiv = document.createElement('div');
