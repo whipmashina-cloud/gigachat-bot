@@ -113,14 +113,15 @@ def ask_gigachat(prompt, sheet_context, web_context, image_file_id=None, mode="s
     wh_names = {"all": "Все базы", "sheet1": "Лист 1 (Основной)", "goods": "Лист «Товары»"}
     selected_wh = wh_names.get(warehouse, "Все базы")
 
-    # Улучшенный системный промпт: строго человеческий формат без разделителей и воды
+    # Промпт с учетом поля «Описание 2» (аналоги и кросс-коды)
     system_prompt = (
         f"Ты профессиональный складской помощник. Источник: '{selected_wh}'. "
-        "Твоя задача — преобразовать сырые данные из базы в аккуратный, красивый и понятный ответ для сотрудника на складе. "
-        "ОФОРМЛЕНИЕ:\n"
-        "1. Пиши без палочек (|), дефисов и технических символов.\n"
-        "2. Выдавай информацию в виде аккуратных строк или коротких пунктов (Название, Артикул/Код, Наличие/Статус, Место хранения).\n"
-        "3. Никакой лишней воды, вводных фраз ('В предоставленных данных...', 'Таким образом...') и заключений. Только факты."
+        "Твоя задача — преобразовать сырые данные из базы в аккуратный и понятный ответ для сотрудника. "
+        "ОСОБЕННОСТИ РАБОТЫ С ДАННЫМИ:\n"
+        "1. В строках таблицы могут быть поля 'Описание 2', где указаны кросс-ноды, бренды или аналоги (например, коды аналогов, комплектующие, совместимость).\n"
+        "2. Обязательно используй эти данные об аналогах и совместимости, особенно если пользователь запрашивает замену или аналог.\n"
+        "3. Пиши без палочек (|), дефисов и технических символов. Выдавай информацию в виде аккуратных строк или коротких пунктов (Название, Артикул, Наличие/Статус, Аналоги/Описание 2).\n"
+        "4. Никакой лишней воды и вводных фраз. Только факты."
     )
     
     combined_context = ""
@@ -141,7 +142,7 @@ def ask_gigachat(prompt, sheet_context, web_context, image_file_id=None, mode="s
             {"role": "system", "content": system_prompt},
             user_message
         ],
-        "temperature": 0.1,
+        "temperature": 0.2,
         "max_tokens": 600
     }
     
@@ -304,13 +305,13 @@ CHAT_TEMPLATE = """
     </header>
 
     <div id="chat-container">
-        <div class="message bot">👋 Приветствую! Введите артикул или название — выдам результат в чистом и удобном виде.</div>
+        <div class="message bot">👋 Приветствую! Теперь данные из «Описания 2» (аналоги и кросс-коды) автоматически учитываются в ответах.</div>
     </div>
 
     <div class="quick-actions">
-        <div class="chip" onclick="quickSend('Диодный мост')">🔍 Диодный мост</div>
-        <div class="chip" onclick="quickSend('Рольганг')">⚙️ Рольганг</div>
+        <div class="chip" onclick="quickSend('Пластина')">🔍 Пластина (с аналогами)</div>
         <div class="chip" onclick="quickSend('Захват кег')">📦 Захват кег</div>
+        <div class="chip" onclick="quickSend('Блок управления')">⚙️ Блок управления</div>
     </div>
 
     <div class="preview-area" id="previewArea">
@@ -387,7 +388,7 @@ CHAT_TEMPLATE = """
 
             const loadDiv = document.createElement('div');
             loadDiv.className = 'message bot';
-            loadDiv.innerHTML = '<span class="loading-pulse">⚡ Ищу позицию...</span>';
+            loadDiv.innerHTML = '<span class="loading-pulse">⚡ Ищу позицию и аналоги...</span>';
             container.appendChild(loadDiv);
             container.scrollTop = container.scrollHeight;
 
