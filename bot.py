@@ -9,11 +9,11 @@ app = Flask(__name__)
 GIGACHAT_AUTH_KEY = os.environ.get("GIGACHAT_AUTH_KEY")
 SPREADSHEET_ID = "115OqjWSWuKFUuZNBomimcbvPsf_c6cyqmBgrFWyFSVE"
 
-# Маппинг листов Google Таблицы (включая новый лист «Товары»)
+# Четкое разделение листов Google Таблицы по выбору в интерфейсе
 SHEET_GIDS = {
-    "all": ["0", "1433962862", "1202844813"],
-    "wh1": ["0", "1202844813"],     # Основной склад + Товары
-    "wh2": ["1433962862"]          # Склад оборудования
+    "all": ["0", "1433962862", "1202844813"], # Все листы вместе
+    "sheet1": ["0", "1433962862"],            # Старые листы (Лист 1 и смежные)
+    "goods": ["1202844813"]                  # Отдельно новый лист «Товары»
 }
 
 def get_gigachat_token():
@@ -63,7 +63,8 @@ def search_in_sheet(query_text, warehouse_filter="all"):
         if not top_rows:
             return ""
             
-        result_text = "Найденные позиции из базы данных предприятия:\n"
+        source_name = "Лист «Товары»" if warehouse_filter == "goods" else ("Лист 1" if warehouse_filter == "sheet1" else "Все базы")
+        result_text = f"Найденные позиции (Источник: {source_name}):\n"
         for r in top_rows:
             # Собираем абсолютно все заполненные ячейки строки
             clean_cells = [cell.strip() for cell in r if cell.strip()]
@@ -112,17 +113,17 @@ def ask_gigachat(prompt, sheet_context, web_context, image_file_id=None, mode="s
         'Authorization': f'Bearer {token}'
     }
     
-    wh_names = {"all": "Все склады и листы", "wh1": "Склад №1 + Товары", "wh2": "Склад оборудования"}
-    selected_wh = wh_names.get(warehouse, "Все склады")
+    wh_names = {"all": "Все листы и базы", "sheet1": "Лист 1 (Основной)", "goods": "Лист «Товары»"}
+    selected_wh = wh_names.get(warehouse, "Все листы")
 
     mode_instructions = {
-        "search": "Режим: Поиск остатков. Выдавай полную информацию из таблиц (наименования, артикулы, блокировки, описания, единицы измерения).",
-        "scan": "Режим: Сканирование шильдика/детали. Сфокусируйся на распознавании маркировок и сопоставлении с позициями базы.",
+        "search": f"Режим: Поиск. Источник: {selected_wh}. Выдавай полную информацию из таблиц (наименования, артикулы, описания, единицы).",
+        "scan": "Режим: Сканирование шильдика/детали. Сфокусируйся на распознавании маркировок и сопоставлении с базой.",
         "analog": "Режим: Подобрать аналоги. Предложи взаимозаменяемые позиции."
     }
 
     system_prompt = (
-        f"Ты главный инженер по оборудованию и складской логистике. Выбран контекст: '{selected_wh}'. "
+        f"Ты главный инженер по оборудованию и складской логистике. Выбранный источник данных: '{selected_wh}'. "
         f"{mode_instructions.get(mode, '')} "
         "Анализируй запросы, изображения, данные из таблиц и интернета. Выдавай развёрнутые и понятные ответы."
     )
@@ -296,9 +297,9 @@ CHAT_TEMPLATE = """
         </div>
         <div class="controls-bar">
             <select id="warehouseSelect">
-                <option value="all">🏢 Все базы и листы</option>
-                <option value="wh1">📦 Склад №1 + Товары</option>
-                <option value="wh2">⚙️ Склад оборудования</option>
+                <option value="all">🏢 Все листы вместе</option>
+                <option value="sheet1">📋 Лист 1 (Основной)</option>
+                <option value="goods">🏷️ Лист «Товары»</option>
             </select>
             <select id="modeSelect">
                 <option value="search">🔎 Поиск</option>
@@ -309,7 +310,7 @@ CHAT_TEMPLATE = """
     </header>
 
     <div id="chat-container">
-        <div class="message bot">👋 Приветствую! Теперь поиск ведется сразу по всем листам, включая новые «Товары».\n\nВведите артикул, название или прикрепите фото.</div>
+        <div class="message bot">👋 Приветствую! Теперь листы разделены в меню выше.\n\nВы можете искать отдельно по Листу 1, отдельно по Листу «Товары» или по всем сразу.</div>
     </div>
 
     <div class="quick-actions">
@@ -350,7 +351,7 @@ CHAT_TEMPLATE = """
         }
 
         function clearImage() {
-            document.getElementById('imageInput').value = '';
+            document.getElementById('imageInput'].value = '';
             document.getElementById('previewArea').style.display = 'none';
         }
 
@@ -392,7 +393,7 @@ CHAT_TEMPLATE = """
 
             const loadDiv = document.createElement('div');
             loadDiv.className = 'message bot';
-            loadDiv.innerHTML = '<span class="loading-pulse">⚡ Ищу по всем листам базы...</span>';
+            loadDiv.innerHTML = '<span class="loading-pulse">⚡ Ищу по выбранному источнику...</span>';
             container.appendChild(loadDiv);
             container.scrollTop = container.scrollHeight;
 
