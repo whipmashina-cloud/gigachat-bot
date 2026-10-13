@@ -32,7 +32,7 @@ def get_gigachat_token():
         return None
 
 def search_in_sheet(query_text):
-    """Ищет совпадения по ключевым словам в Google Таблице"""
+    """Ищет совпадения по тексту или цифрам в Google Таблице"""
     try:
         response = requests.get(SHEET_CSV_URL)
         if response.status_code != 200:
@@ -41,12 +41,14 @@ def search_in_sheet(query_text):
         reader = csv.reader(io.StringIO(response.text))
         rows = list(reader)
         
-        query_lower = query_text.lower()
+        query_lower = query_text.lower().strip()
         matched_rows = []
         
+        # Ищем совпадение любой части запроса в строке таблицы
         for row in rows[1:]:
             row_str = " ".join(row).lower()
-            if any(word in row_str for word in query_lower.split() if len(word) > 2):
+            # Проверяем, есть ли запрос или ключевые слова из него в строке
+            if query_lower in row_str or any(word in row_str for word in query_lower.split() if len(word) > 1):
                 matched_rows.append(row)
                 if len(matched_rows) >= 5:
                     break
@@ -85,16 +87,15 @@ def ask_gigachat(prompt, sheet_context):
     
     system_prompt = (
         "Ты профессиональный технический ассистент и инженер по оборудованию и складской логистике на производстве. "
-        "В первую очередь опирайся на данные из внутренней базы 1С предприятия (если они предоставлены в запросе). "
-        "Если данных в таблице нет или пользователь спрашивает общие технические вопросы, подбор аналогов, стандарты, "
-        "характеристики или инструкции, используй свои экспертные знания и инженерный опыт, чтобы дать полный, развернутый и полезный ответ."
+        "Внимательно анализируй данные из внутренней базы 1С предприятия, переданные в запросе. Если позиция найдена в таблице, "
+        "обязательно укажи её точные данные, склад и место хранения. Если данных в таблице нет или задан общий вопрос, "
+        "используй свои инженерные знания, чтобы помочь подобрать аналоги, описать характеристики или дать техническую консультацию."
     )
     
-    user_content = prompt
     if sheet_context:
         user_content = f"{sheet_context}\n\nВопрос пользователя: {prompt}"
     else:
-        user_content = f"Вопрос пользователя (во внутренней базе 1С точных совпадений не найдено, отвечай на основе экспертных знаний): {prompt}"
+        user_content = f"Вопрос пользователя (во внутренней базе 1С точных совпадений по этому запросу не нашлось, отвечай на основе экспертных инженерных знаний): {prompt}"
 
     payload = {
         "model": "GigaChat",
@@ -122,9 +123,7 @@ def webhook():
         text = data['message'].get('text', '')
         
         if text:
-            # Ищем в таблице
             sheet_data = search_in_sheet(text)
-            # Передаем и вопрос, и найденный контекст (если есть) в GigaChat
             reply_text = ask_gigachat(text, sheet_data)
             send_message(chat_id, reply_text)
             
