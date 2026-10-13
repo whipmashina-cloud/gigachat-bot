@@ -1,7 +1,6 @@
 import os
 import csv
 import io
-import base64
 import requests
 from flask import Flask, request
 from duckduckgo_search import DDGS
@@ -11,7 +10,6 @@ app = Flask(__name__)
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 GIGACHAT_AUTH_KEY = os.environ.get("GIGACHAT_AUTH_KEY")
 
-# ID вашей Google Таблицы
 SPREADSHEET_ID = "115OqjWSWuKFUuZNBomimcbvPsf_c6cyqmBgrFWyFSVE"
 SHEET_GIDS = ["0", "1433962862"]
 
@@ -92,123 +90,35 @@ def search_web(query_text):
         print(f"Web search error: {e}")
         return ""
 
-def get_telegram_file_base64(file_id):
-    """Скачивает файл из Telegram по file_id и кодирует в Base64"""
+def upload_image_to_gigachat(token, image_bytes):
+    """Загружает файл изображения в хранилище GigaChat API и возвращает file_id"""
+    url = "https://gigachat.devices.sberbank.ru/api/v1/files"
+    headers = {
+        'Authorization': f'Bearer {token}'
+    }
+    files = {
+        'file': ('image.jpg', image_bytes, 'image/jpeg')
+    }
+    data = {
+        'purpose': 'general'
+    }
     try:
-        # 1. Получаем путь к файлу у серверов Telegram
-        file_info_url = f"{TELEGRAM_API_URL}/getFile?file_id={file_id}"
-        r = requests.get(file_info_url).json()
-        if not r.get("ok"):
-            return None
-        file_path = r["result"]["file_path"]
-        
-        # 2. Скачиваем сам файл
-        download_url = f"https://api.telegram.org/file/bot{TELEGRAM_TOKEN}/{file_path}"
-        file_response = requests.get(download_url)
-        if file_response.status_code == 200:
-            # 3. Переводим в base64 строку для GigaChat
-            encoded = base64.b64encode(file_response.content).decode('utf-8')
-            return encoded
+        response = requests.post(url, headers=headers, files=files, data=data, verify=False)
+        if response.status_code == 200:
+            res_json = response.json()
+            file_id = res_json.get('id')
+            print(f"Image uploaded successfully to GigaChat, file_id: {file_id}")
+            return file_id
+        else:
+            print(f"Failed to upload image to GigaChat: {response.status_code} - {response.text}")
     except Exception as e:
-        print(f"Error downloading photo from telegram: {e}")
+        print(f"Error uploading image: {e}")
     return None
 
-def ask_gigachat(prompt, sheet_context, web_context, image_base64=None):
-    """Отправка запроса в GigaChat с поддержкой текста, контекста таблиц/сети и изображений"""
+def ask_gigachat(prompt, sheet_context, web_context, image_file_id=None):
+    """Отправка запроса в GigaChat с поддержкой изображений и расширенным анализом"""
     token = get_gigachat_token()
     if not token:
         return "Ошибка авторизации GigaChat."
         
-    url = "https://gigachat.devices.sberbank.ru/api/v1/chat/completions"
-    headers = {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-        'Authorization': f'Bearer {token}'
-    }
-    
-    system_prompt = (
-        "Ты главный инженер по оборудованию и складской логистике. "
-        "Анализируй присланные изображения (детали, узлы, маркировки, запчасти), а также данные из внутренней базы Google Таблицы "
-        "и интернета. Помогай идентифицировать запчасти, определять их назначение, предлагать аналоги и указывать места хранения, если они есть в базе."
-    )
-    
-    combined_context = ""
-    if sheet_context:
-        combined_context += f"{sheet_context}\n\n"
-    if web_context:
-        combined_context += f"{web_context}\n\n"
-        
-    user_text = f"{combined_context}Запрос пользователя: {prompt if prompt else 'Что изображено на фото? Определи деталь и её характеристики.'}"
-
-    # Формируем структуру сообщения (если есть картинка, передаем её через attachments)
-    user_message = {
-        "role": "user",
-        "content": user_text
-    }
-    
-    if image_base64:
-        user_message["attachments"] = [image_base64]
-
-    payload = {
-        "model": "GigaChat",
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            user_message
-        ],
-        "temperature": 0.3,
-        "max_tokens": 1200
-    }
-    
-    try:
-        response = requests.post(url, headers=headers, json=payload, verify=False)
-        res_data = response.json()
-        return res_data['choices'][0]['message']['content']
-    except Exception as e:
-        print(f"GigaChat error: {e}")
-        print(response.text if 'response' in locals() else "")
-        return "Произошла ошибка при анализе изображения или запроса."
-
-@app.route('/webhook', methods=['POST'])
-def webhook():
-    data = request.get_json()
-    if data and 'message' in data:
-        message = data['message']
-        chat_id = message['chat']['id']
-        
-        text = message.get('text', '') or message.get('caption', '') # Текст или подпись к фото
-        image_base64 = None
-        
-        # Проверяем, есть ли в сообщении фотография
-        if 'photo' in message:
-            # Telegram присылает фото в нескольких размерах, берем последнее (самое качественное)
-            photo_file_id = message['photo'][-1]['file_id']
-            image_base64 = get_telegram_file_base64(photo_file_id)
-            if not text:
-                text = "Что это за деталь или узел? Распознай по фото."
-        
-        if text or image_base64:
-            # Ищем в таблице по ключевым словам (если текст есть)
-            sheet_data = search_in_sheet(text) if text else ""
-            # Ищем в интернете
-            web_data = search_web(text) if text else ""
-            
-            # Отправляем всё в GigaChat
-            reply_text = ask_gigachat(text, sheet_data, web_data, image_base64)
-            send_message(chat_id, reply_text)
-            
-    return 'ok', 200
-
-def send_message(chat_id, text):
-    url = f"{TELEGRAM_API_URL}/sendMessage"
-    payload = {
-        'chat_id': chat_id,
-        'text': text
-    }
-    requests.post(url, json=payload)
-
-@app.route('/')
-def index():
-    return "HELLO, MULTIMODAL HYBRID BOT!"
-
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=10000)
+    url = "
