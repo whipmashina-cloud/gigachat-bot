@@ -70,7 +70,6 @@ def get_combined_warehouse_data(mode="all"):
 
 @app.route('/')
 def index():
-    # Flask автоматически ищет этот файл внутри папки templates/
     return render_template('index.html')
 
 @app.route('/api/chat', methods=['POST'])
