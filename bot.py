@@ -2,6 +2,7 @@ import os
 import csv
 import io
 import requests
+from PIL import Image
 from flask import Flask, request, render_template_string, Response
 
 app = Flask(__name__)
@@ -33,6 +34,9 @@ def get_gigachat_token():
 
 def search_in_sheet(query_text, warehouse_filter="all"):
     try:
+        if not query_text or len(query_text.strip()) < 1:
+            return ""
+            
         all_rows = []
         gids_to_search = SHEET_GIDS.get(warehouse_filter, SHEET_GIDS["all"])
         
@@ -47,6 +51,7 @@ def search_in_sheet(query_text, warehouse_filter="all"):
         if not all_rows:
             return ""
             
+        # Улучшенный поиск: разбиваем запрос на слова и ищем совпадения по любому из них
         query_words = [w.lower().strip() for w in query_text.split() if len(w) > 1]
         if not query_words:
             query_words = [query_text.lower().strip()]
@@ -54,15 +59,17 @@ def search_in_sheet(query_text, warehouse_filter="all"):
         matched_rows = []
         for row in all_rows:
             row_str = " ".join(row).lower()
+            # Проверяем, есть ли хотя бы одно слово из запроса в строке таблицы
             if any(w in row_str for w in query_words):
                 if row not in matched_rows:
                     matched_rows.append(row)
                     
-        top_rows = matched_rows[:6]
+        # Передаем больше строк (до 15 штук), чтобы ИИ мог проанализировать их точнее
+        top_rows = matched_rows[:15]
         if not top_rows:
-            return ""
+            return "Совпадений в выбранной базе не найдено."
             
-        result_text = "Сырые данные из базы:\n"
+        result_text = "Найденные потенциальные позиции из базы для анализа:\n"
         for r in top_rows:
             clean_cells = [cell.strip() for cell in r if cell.strip()]
             if clean_cells:
@@ -88,14 +95,25 @@ def search_web(query_text):
 def upload_image_to_gigachat(token, image_bytes):
     url = "https://gigachat.devices.sberbank.ru/api/v1/files"
     headers = {'Authorization': f'Bearer {token}'}
-    files = {'file': ('image.jpg', image_bytes, 'image/jpeg')}
-    data = {'purpose': 'general'}
+    
     try:
+        img = Image.open(io.BytesIO(image_bytes))
+        if img.mode in ('RGBA', 'P'):
+            img = img.convert('RGB')
+        
+        img.thumbnail((1200, 1200))
+        output = io.BytesIO()
+        img.save(output, format='JPEG', quality=85)
+        compressed_bytes = output.getvalue()
+
+        files = {'file': ('image.jpg', compressed_bytes, 'image/jpeg')}
+        data = {'purpose': 'general'}
+        
         response = requests.post(url, headers=headers, files=files, data=data, verify=False)
         if response.status_code == 200:
             return response.json().get('id')
     except Exception as e:
-        print(f"Error uploading image: {e}")
+        print(f"Error processing image: {e}")
     return None
 
 def ask_gigachat(prompt, sheet_context, web_context, image_file_id=None, mode="search", warehouse="all"):
@@ -113,15 +131,15 @@ def ask_gigachat(prompt, sheet_context, web_context, image_file_id=None, mode="s
     wh_names = {"all": "Все базы", "sheet1": "Лист 1 (Основной)", "goods": "Лист «Товары»"}
     selected_wh = wh_names.get(warehouse, "Все базы")
 
-    # Промпт с учетом поля «Описание 2» (аналоги и кросс-коды)
+    # Жесткий системный промпт для точного анализа всего контекста
     system_prompt = (
-        f"Ты профессиональный складской помощник. Источник: '{selected_wh}'. "
-        "Твоя задача — преобразовать сырые данные из базы в аккуратный и понятный ответ для сотрудника. "
-        "ОСОБЕННОСТИ РАБОТЫ С ДАННЫМИ:\n"
-        "1. В строках таблицы могут быть поля 'Описание 2', где указаны кросс-ноды, бренды или аналоги (например, коды аналогов, комплектующие, совместимость).\n"
-        "2. Обязательно используй эти данные об аналогах и совместимости, особенно если пользователь запрашивает замену или аналог.\n"
-        "3. Пиши без палочек (|), дефисов и технических символов. Выдавай информацию в виде аккуратных строк или коротких пунктов (Название, Артикул, Наличие/Статус, Аналоги/Описание 2).\n"
-        "4. Никакой лишней воды и вводных фраз. Только факты."
+        f"Ты главный инженер и эксперт по складской логистике. База данных: '{selected_wh}'. "
+        "Твоя задача — проанализировать переданные данные из таблиц (или текст/изображение с фото), "
+        "найти точное соответствие запросу пользователя и выдать результат.\n"
+        "ПРАВИЛА ОФОРМЛЕНИЯ:\n"
+        "1. Пиши исключительно человеческим языком, без палочек (|), дефисов и технических символов.\n"
+        "2. Выдавай ответ в виде аккуратных строк или коротких пунктов: Название, Артикул/Код, Статус/Наличие, Место хранения, Аналоги (Описание 2).\n"
+        "3. Никакой воды, вводных фраз и заключений. Только точные данные из базы."
     )
     
     combined_context = ""
@@ -130,7 +148,7 @@ def ask_gigachat(prompt, sheet_context, web_context, image_file_id=None, mode="s
     if web_context:
         combined_context += f"{web_context}\n\n"
         
-    user_text = f"{combined_context}Запрос пользователя: {prompt if prompt else 'Обработай фото и дай справку.'}"
+    user_text = f"{combined_context}Запрос пользователя: {prompt if prompt else 'Проанализируй фото, сопоставь с базой и дай точную информацию.'}"
 
     user_message = {"role": "user", "content": user_text}
     if image_file_id:
@@ -142,8 +160,8 @@ def ask_gigachat(prompt, sheet_context, web_context, image_file_id=None, mode="s
             {"role": "system", "content": system_prompt},
             user_message
         ],
-        "temperature": 0.2,
-        "max_tokens": 600
+        "temperature": 0.1,
+        "max_tokens": 800
     }
     
     try:
@@ -297,21 +315,21 @@ CHAT_TEMPLATE = """
                 <option value="goods">🏷️ Лист «Товары»</option>
             </select>
             <select id="modeSelect">
-                <option value="search">🔎 Поиск</option>
-                <option value="scan">📷 Сканер</option>
+                <option value="search">🔎 Точный поиск</option>
+                <option value="scan">📷 Сканер шильдиков</option>
                 <option value="analog">🛠️ Аналоги</option>
             </select>
         </div>
     </header>
 
     <div id="chat-container">
-        <div class="message bot">👋 Приветствую! Теперь данные из «Описания 2» (аналоги и кросс-коды) автоматически учитываются в ответах.</div>
+        <div class="message bot">👋 Приветствую! Точный поиск активирован. Введите артикул, название или прикрепите фото для глубокого анализа базы.</div>
     </div>
 
     <div class="quick-actions">
-        <div class="chip" onclick="quickSend('Пластина')">🔍 Пластина (с аналогами)</div>
+        <div class="chip" onclick="quickSend('Диодный мост')">🔍 Диодный мост</div>
         <div class="chip" onclick="quickSend('Захват кег')">📦 Захват кег</div>
-        <div class="chip" onclick="quickSend('Блок управления')">⚙️ Блок управления</div>
+        <div class="chip" onclick="quickSend('Рольганг')">⚙️ Рольганг</div>
     </div>
 
     <div class="preview-area" id="previewArea">
@@ -324,7 +342,7 @@ CHAT_TEMPLATE = """
         <label class="icon-btn" title="Сделать фото">
             📷 <input type="file" id="imageInput" accept="image/*" onchange="handleImageSelect(event)">
         </label>
-        <input type="text" id="messageInput" placeholder="Артикул или наименование..." autocomplete="off">
+        <input type="text" id="messageInput" placeholder="Артикул, название или фото..." autocomplete="off">
         <button type="submit" class="send-btn">➔</button>
     </form>
 
@@ -388,7 +406,7 @@ CHAT_TEMPLATE = """
 
             const loadDiv = document.createElement('div');
             loadDiv.className = 'message bot';
-            loadDiv.innerHTML = '<span class="loading-pulse">⚡ Ищу позицию и аналоги...</span>';
+            loadDiv.innerHTML = '<span class="loading-pulse">⚡ Провожу точный анализ базы...</span>';
             container.appendChild(loadDiv);
             container.scrollTop = container.scrollHeight;
 
@@ -455,6 +473,7 @@ def api_chat():
     warehouse = request.form.get('warehouse', 'all')
     mode = request.form.get('mode', 'search')
     image_file_id = None
+    extracted_keywords = text
 
     if 'image' in request.files:
         img_file = request.files['image']
@@ -463,9 +482,11 @@ def api_chat():
             token = get_gigachat_token()
             if token:
                 image_file_id = upload_image_to_gigachat(token, img_bytes)
+                if image_file_id and not text:
+                    extracted_keywords = "Распознай маркировку, артикул или название детали на этом фото для точного поиска"
 
-    sheet_data = search_in_sheet(text, warehouse) if text else ""
-    web_data = search_web(text) if (text and mode == "analog") else ""
+    sheet_data = search_in_sheet(extracted_keywords, warehouse) if extracted_keywords else ""
+    web_data = search_web(extracted_keywords) if (extracted_keywords and mode == "analog") else ""
 
     reply_text = ask_gigachat(text, sheet_data, web_data, image_file_id, mode, warehouse)
     return {'reply': reply_text}
