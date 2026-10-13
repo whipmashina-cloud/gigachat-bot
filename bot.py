@@ -2,8 +2,7 @@ import os
 import csv
 import io
 import requests
-from flask import Flask, request, render_template_string
-from duckduckgo_search import DDGS
+from flask import Flask, request, render_template_string, Response
 
 app = Flask(__name__)
 
@@ -12,7 +11,6 @@ SPREADSHEET_ID = "115OqjWSWuKFUuZNBomimcbvPsf_c6cyqmBgrFWyFSVE"
 SHEET_GIDS = ["0", "1433962862"]
 
 def get_gigachat_token():
-    """Получение токена доступа для GigaChat API"""
     url = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
     payload = {'scope': 'GIGACHAT_API_PERS'}
     headers = {
@@ -29,7 +27,6 @@ def get_gigachat_token():
         return None
 
 def search_in_sheet(query_text):
-    """Ищет совпадения по всем вкладкам Google Таблицы"""
     try:
         all_rows = []
         for g in SHEET_GIDS:
@@ -75,8 +72,8 @@ def search_in_sheet(query_text):
         return ""
 
 def search_web(query_text):
-    """Ищет информацию в интернете"""
     try:
+        from duckduckgo_search import DDGS
         with DDGS() as ddgs:
             results = [r['body'] for r in ddgs.text(query_text, max_results=3)]
         if results:
@@ -87,7 +84,6 @@ def search_web(query_text):
         return ""
 
 def upload_image_to_gigachat(token, image_bytes):
-    """Загружает изображение в GigaChat API"""
     url = "https://gigachat.devices.sberbank.ru/api/v1/files"
     headers = {'Authorization': f'Bearer {token}'}
     files = {'file': ('image.jpg', image_bytes, 'image/jpeg')}
@@ -101,7 +97,6 @@ def upload_image_to_gigachat(token, image_bytes):
     return None
 
 def ask_gigachat(prompt, sheet_context, web_context, image_file_id=None):
-    """Отправка запроса в GigaChat"""
     token = get_gigachat_token()
     if not token:
         return "Ошибка авторизации GigaChat."
@@ -151,13 +146,15 @@ def ask_gigachat(prompt, sheet_context, web_context, image_file_id=None):
     except Exception as e:
         return f"Ошибка запроса: {str(e)}"
 
-# HTML-интерфейс мобильного веб-приложения (PWA-чат)
+# Главная HTML-страница PWA
 CHAT_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#1976d2">
     <title>AI Складской Помощник</title>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f0f2f5; margin: 0; padding: 0; display: flex; flex-direction: column; height: 100vh; }
@@ -181,11 +178,15 @@ CHAT_TEMPLATE = """
     </div>
     <form id="input-form" onsubmit="sendMessage(event)">
         <label class="file-btn" title="Прикрепить фото">📷<input type="file" id="imageInput" accept="image/*"></label>
-        <input type="text" id="messageInput" placeholder="Введите сообщение или название детали..." autocomplete="off">
+        <input type="text" id="messageInput" placeholder="Введите сообщение или артикул..." autocomplete="off">
         <button type="submit" class="send-btn">Отправить</button>
     </form>
 
     <script>
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('/sw.js');
+        }
+
         async function sendMessage(e) {
             e.preventDefault();
             const msgInput = document.getElementById('messageInput');
@@ -197,7 +198,6 @@ CHAT_TEMPLATE = """
 
             if (!text && file.length === 0) return;
 
-            // Добавляем сообщение пользователя в чат
             const userDiv = document.createElement('div');
             userDiv.className = 'message user';
             userDiv.innerText = text + (file.length > 0 ? " [Прикреплено фото]" : "");
@@ -206,14 +206,13 @@ CHAT_TEMPLATE = """
             const formData = new FormData();
             formData.append('text', text);
             if (file.length > 0) {
-                formData.append('image', file);
+                formData.append('image', file[0]);
             }
 
             msgInput.value = '';
             imgInput.value = '';
             container.scrollTop = container.scrollHeight;
 
-            // Индикатор загрузки
             const loadDiv = document.createElement('div');
             loadDiv.className = 'message bot loading';
             loadDiv.innerText = 'Анализирую данные и таблицы... ⏳';
@@ -244,9 +243,44 @@ CHAT_TEMPLATE = """
 </html>
 """
 
+# Манифест для PWA
+MANIFEST_JSON = """{
+  "name": "AI Складской Помощник",
+  "short_name": "Склад AI",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#1976d2",
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/3061/3061341.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}"""
+
+# Service Worker для PWA
+SERVICE_WORKER_JS = """
+self.addEventListener('install', (e) => {
+  self.skipWaiting();
+});
+self.addEventListener('fetch', (e) => {
+  e.respondWith(fetch(e.request));
+});
+"""
+
 @app.route('/')
 def index():
     return render_template_string(CHAT_TEMPLATE)
+
+@app.route('/manifest.json')
+def manifest():
+    return Response(MANIFEST_JSON, mimetype='application/json')
+
+@app.route('/sw.js')
+def service_worker():
+    return Response(SERVICE_WORKER_JS, mimetype='application/javascript')
 
 @app.route('/api/chat', methods=['POST'])
 def api_chat():
