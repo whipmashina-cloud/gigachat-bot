@@ -26,7 +26,7 @@ def get_gigachat_token():
         'Authorization': f'Bearer {GIGACHAT_AUTH_KEY}'
     }
     try:
-        response = requests.post(url, headers=headers, data=payload, verify=False)
+        response = requests.post(url, headers=headers, data=payload, verify=False, timeout=10)
         return response.json().get('access_token')
     except Exception as e:
         print(f"Error getting token: {e}")
@@ -39,7 +39,7 @@ def search_in_sheet(query_text, warehouse_filter="all"):
         
         for g in gids_to_search:
             url = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/export?format=csv&gid={g}"
-            response = requests.get(url)
+            response = requests.get(url, timeout=10)
             if response.status_code == 200:
                 reader = csv.reader(io.StringIO(response.text))
                 rows = list(reader)
@@ -48,7 +48,6 @@ def search_in_sheet(query_text, warehouse_filter="all"):
         if not all_rows:
             return ""
             
-        # Если передан конкретный поисковый запрос
         if query_text and len(query_text.strip()) > 1:
             query_words = [w.lower().strip() for w in query_text.split() if len(w) > 1]
             if not query_words:
@@ -62,13 +61,12 @@ def search_in_sheet(query_text, warehouse_filter="all"):
                         matched_rows.append(row)
             top_rows = matched_rows[:15]
         else:
-            # Если поиск пустой (например, при отправке чисто фото), берем первые строки для контекста
-            top_rows = all_rows[:20]
+            top_rows = all_rows[:15]
             
         if not top_rows:
-            return "База данных пуста или не содержит совпадений."
+            return "Совпадений в базе не найдено."
             
-        result_text = "Данные из базы предприятия для сопоставления:\n"
+        result_text = "Данные из базы предприятия:\n"
         for r in top_rows:
             clean_cells = [cell.strip() for cell in r if cell.strip()]
             if clean_cells:
@@ -77,18 +75,6 @@ def search_in_sheet(query_text, warehouse_filter="all"):
         return result_text
     except Exception as e:
         print(f"Error reading sheets: {e}")
-        return ""
-
-def search_web(query_text):
-    try:
-        from duckduckgo_search import DDGS
-        with DDGS() as ddgs:
-            results = [r['body'] for r in ddgs.text(query_text, max_results=3)]
-        if results:
-            return "Информация из интернета:\n" + "\n".join(f"- {res}" for res in results)
-        return ""
-    except Exception as e:
-        print(f"Web search error: {e}")
         return ""
 
 def upload_image_to_gigachat(token, image_bytes):
@@ -100,22 +86,22 @@ def upload_image_to_gigachat(token, image_bytes):
         if img.mode in ('RGBA', 'P'):
             img = img.convert('RGB')
         
-        img.thumbnail((1200, 1200))
+        img.thumbnail((1000, 1000))
         output = io.BytesIO()
-        img.save(output, format='JPEG', quality=85)
+        img.save(output, format='JPEG', quality=80)
         compressed_bytes = output.getvalue()
 
         files = {'file': ('image.jpg', compressed_bytes, 'image/jpeg')}
         data = {'purpose': 'general'}
         
-        response = requests.post(url, headers=headers, files=files, data=data, verify=False)
+        response = requests.post(url, headers=headers, files=files, data=data, verify=False, timeout=15)
         if response.status_code == 200:
             return response.json().get('id')
     except Exception as e:
         print(f"Error processing image: {e}")
     return None
 
-def ask_gigachat(prompt, sheet_context, web_context, image_file_id=None, mode="search", warehouse="all"):
+def ask_gigachat(prompt, sheet_context, image_file_id=None, warehouse="all"):
     token = get_gigachat_token()
     if not token:
         return "Ошибка авторизации GigaChat."
@@ -131,22 +117,13 @@ def ask_gigachat(prompt, sheet_context, web_context, image_file_id=None, mode="s
     selected_wh = wh_names.get(warehouse, "Все базы")
 
     system_prompt = (
-        f"Ты главный инженер и эксперт по складской логистике. База данных: '{selected_wh}'. "
-        "Твоя задача — проанализировать текст или загруженное изображение (шильдик, деталь, маркировку), "
-        "найти точное соответствие в предоставленных данных базы и выдать результат.\n"
-        "ПРАВИЛА ОФОРМЛЕНИЯ:\n"
-        "1. Пиши исключительно человеческим языком, без палочек (|), дефисов и технических символов.\n"
-        "2. Выдавай ответ в виде аккуратных строк или коротких пунктов: Название, Артикул/Код, Статус/Наличие, Место хранения, Аналоги (Описание 2).\n"
-        "3. Никакой воды, вводных фраз и заключений. Только точные данные."
+        f"Ты главный инженер по складской логистике. База: '{selected_wh}'. "
+        "Проанализируй запрос и данные из таблиц. Если прикреплено фото, найди совпадение с позициями базы. "
+        "Отвечай кратко, человеческим языком, без палочек (|) и технических символов. Только суть."
     )
     
-    combined_context = ""
-    if sheet_context:
-        combined_context += f"{sheet_context}\n\n"
-    if web_context:
-        combined_context += f"{web_context}\n\n"
-        
-    user_text = f"{combined_context}Запрос пользователя: {prompt if prompt else 'Распознай маркировку или деталь на фото, сопоставь с базой и дай точную информацию.'}"
+    combined_context = sheet_context if sheet_context else ""
+    user_text = f"{combined_context}\nЗапрос пользователя: {prompt if prompt else 'Найди позицию по фото в базе.'}"
 
     user_message = {"role": "user", "content": user_text}
     if image_file_id:
@@ -159,16 +136,18 @@ def ask_gigachat(prompt, sheet_context, web_context, image_file_id=None, mode="s
             user_message
         ],
         "temperature": 0.1,
-        "max_tokens": 800
+        "max_tokens": 600
     }
     
     try:
-        response = requests.post(url, headers=headers, json=payload, verify=False)
+        response = requests.post(url, headers=headers, json=payload, verify=False, timeout=25)
         res_data = response.json()
         if 'choices' in res_data and len(res_data['choices']) > 0:
             return res_data['choices'][0]['message']['content']
         else:
-            return f"Ошибка GigaChat API: {res_data}"
+            return f"Ошибка ответа GigaChat."
+    except requests.exceptions.Timeout:
+        return "Превышено время ожидания ответа от ИИ. Попробуйте отправить запрос еще раз."
     except Exception as e:
         return f"Ошибка запроса: {str(e)}"
 
@@ -313,7 +292,7 @@ CHAT_TEMPLATE = """
                 <option value="goods">🏷️ Лист «Товары»</option>
             </select>
             <select id="modeSelect">
-                <option value="search">🔎 Точный поиск</option>
+                <option value="search">🔎 Поиск</option>
                 <option value="scan">📷 Сканер шильдиков</option>
                 <option value="analog">🛠️ Аналоги</option>
             </select>
@@ -321,7 +300,7 @@ CHAT_TEMPLATE = """
     </header>
 
     <div id="chat-container">
-        <div class="message bot">👋 Приветствую! Отправьте фото шильдика или детали — ИИ считает данные и выдаст информацию по базам.</div>
+        <div class="message bot">👋 Приветствую! Отправьте текстовый запрос или фото для поиска.</div>
     </div>
 
     <div class="quick-actions">
@@ -376,7 +355,6 @@ CHAT_TEMPLATE = """
             const msgInput = document.getElementById('messageInput');
             const imgInput = document.getElementById('imageInput');
             const warehouse = document.getElementById('warehouseSelect').value;
-            const mode = document.getElementById('modeSelect').value;
             const container = document.getElementById('chat-container');
 
             const text = msgInput.value.trim();
@@ -392,7 +370,6 @@ CHAT_TEMPLATE = """
             const formData = new FormData();
             formData.append('text', text);
             formData.append('warehouse', warehouse);
-            formData.append('mode', mode);
 
             if (files.length > 0) {
                 formData.append('image', files[0]);
@@ -404,7 +381,7 @@ CHAT_TEMPLATE = """
 
             const loadDiv = document.createElement('div');
             loadDiv.className = 'message bot';
-            loadDiv.innerHTML = '<span class="loading-pulse">⚡ Читаю фото и ищу в базах...</span>';
+            loadDiv.innerHTML = '<span class="loading-pulse">⚡ Обрабатываю запрос...</span>';
             container.appendChild(loadDiv);
             container.scrollTop = container.scrollHeight;
 
@@ -469,9 +446,7 @@ def service_worker():
 def api_chat():
     text = request.form.get('text', '')
     warehouse = request.form.get('warehouse', 'all')
-    mode = request.form.get('mode', 'search')
     image_file_id = None
-    extracted_keywords = text
 
     if 'image' in request.files:
         img_file = request.files['image']
@@ -481,11 +456,8 @@ def api_chat():
             if token:
                 image_file_id = upload_image_to_gigachat(token, img_bytes)
 
-    # Загружаем контекст из таблиц (если текст пустой, подтягиваем базовый срез для сверки с фото)
-    sheet_data = search_in_sheet(extracted_keywords, warehouse)
-    web_data = search_web(text) if (text and mode == "analog") else ""
-
-    reply_text = ask_gigachat(text, sheet_data, web_data, image_file_id, mode, warehouse)
+    sheet_data = search_in_sheet(text, warehouse)
+    reply_text = ask_gigachat(text, sheet_data, image_file_id, warehouse)
     return {'reply': reply_text}
 
 if __name__ == '__main__':
