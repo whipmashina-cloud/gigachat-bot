@@ -34,9 +34,6 @@ def get_gigachat_token():
 
 def search_in_sheet(query_text, warehouse_filter="all"):
     try:
-        if not query_text or len(query_text.strip()) < 1:
-            return ""
-            
         all_rows = []
         gids_to_search = SHEET_GIDS.get(warehouse_filter, SHEET_GIDS["all"])
         
@@ -51,25 +48,27 @@ def search_in_sheet(query_text, warehouse_filter="all"):
         if not all_rows:
             return ""
             
-        # Улучшенный поиск: разбиваем запрос на слова и ищем совпадения по любому из них
-        query_words = [w.lower().strip() for w in query_text.split() if len(w) > 1]
-        if not query_words:
-            query_words = [query_text.lower().strip()]
+        # Если передан конкретный поисковый запрос
+        if query_text and len(query_text.strip()) > 1:
+            query_words = [w.lower().strip() for w in query_text.split() if len(w) > 1]
+            if not query_words:
+                query_words = [query_text.lower().strip()]
+                
+            matched_rows = []
+            for row in all_rows:
+                row_str = " ".join(row).lower()
+                if any(w in row_str for w in query_words):
+                    if row not in matched_rows:
+                        matched_rows.append(row)
+            top_rows = matched_rows[:15]
+        else:
+            # Если поиск пустой (например, при отправке чисто фото), берем первые строки для контекста
+            top_rows = all_rows[:20]
             
-        matched_rows = []
-        for row in all_rows:
-            row_str = " ".join(row).lower()
-            # Проверяем, есть ли хотя бы одно слово из запроса в строке таблицы
-            if any(w in row_str for w in query_words):
-                if row not in matched_rows:
-                    matched_rows.append(row)
-                    
-        # Передаем больше строк (до 15 штук), чтобы ИИ мог проанализировать их точнее
-        top_rows = matched_rows[:15]
         if not top_rows:
-            return "Совпадений в выбранной базе не найдено."
+            return "База данных пуста или не содержит совпадений."
             
-        result_text = "Найденные потенциальные позиции из базы для анализа:\n"
+        result_text = "Данные из базы предприятия для сопоставления:\n"
         for r in top_rows:
             clean_cells = [cell.strip() for cell in r if cell.strip()]
             if clean_cells:
@@ -131,15 +130,14 @@ def ask_gigachat(prompt, sheet_context, web_context, image_file_id=None, mode="s
     wh_names = {"all": "Все базы", "sheet1": "Лист 1 (Основной)", "goods": "Лист «Товары»"}
     selected_wh = wh_names.get(warehouse, "Все базы")
 
-    # Жесткий системный промпт для точного анализа всего контекста
     system_prompt = (
         f"Ты главный инженер и эксперт по складской логистике. База данных: '{selected_wh}'. "
-        "Твоя задача — проанализировать переданные данные из таблиц (или текст/изображение с фото), "
-        "найти точное соответствие запросу пользователя и выдать результат.\n"
+        "Твоя задача — проанализировать текст или загруженное изображение (шильдик, деталь, маркировку), "
+        "найти точное соответствие в предоставленных данных базы и выдать результат.\n"
         "ПРАВИЛА ОФОРМЛЕНИЯ:\n"
         "1. Пиши исключительно человеческим языком, без палочек (|), дефисов и технических символов.\n"
         "2. Выдавай ответ в виде аккуратных строк или коротких пунктов: Название, Артикул/Код, Статус/Наличие, Место хранения, Аналоги (Описание 2).\n"
-        "3. Никакой воды, вводных фраз и заключений. Только точные данные из базы."
+        "3. Никакой воды, вводных фраз и заключений. Только точные данные."
     )
     
     combined_context = ""
@@ -148,7 +146,7 @@ def ask_gigachat(prompt, sheet_context, web_context, image_file_id=None, mode="s
     if web_context:
         combined_context += f"{web_context}\n\n"
         
-    user_text = f"{combined_context}Запрос пользователя: {prompt if prompt else 'Проанализируй фото, сопоставь с базой и дай точную информацию.'}"
+    user_text = f"{combined_context}Запрос пользователя: {prompt if prompt else 'Распознай маркировку или деталь на фото, сопоставь с базой и дай точную информацию.'}"
 
     user_message = {"role": "user", "content": user_text}
     if image_file_id:
@@ -323,7 +321,7 @@ CHAT_TEMPLATE = """
     </header>
 
     <div id="chat-container">
-        <div class="message bot">👋 Приветствую! Точный поиск активирован. Введите артикул, название или прикрепите фото для глубокого анализа базы.</div>
+        <div class="message bot">👋 Приветствую! Отправьте фото шильдика или детали — ИИ считает данные и выдаст информацию по базам.</div>
     </div>
 
     <div class="quick-actions">
@@ -406,7 +404,7 @@ CHAT_TEMPLATE = """
 
             const loadDiv = document.createElement('div');
             loadDiv.className = 'message bot';
-            loadDiv.innerHTML = '<span class="loading-pulse">⚡ Провожу точный анализ базы...</span>';
+            loadDiv.innerHTML = '<span class="loading-pulse">⚡ Читаю фото и ищу в базах...</span>';
             container.appendChild(loadDiv);
             container.scrollTop = container.scrollHeight;
 
@@ -482,11 +480,10 @@ def api_chat():
             token = get_gigachat_token()
             if token:
                 image_file_id = upload_image_to_gigachat(token, img_bytes)
-                if image_file_id and not text:
-                    extracted_keywords = "Распознай маркировку, артикул или название детали на этом фото для точного поиска"
 
-    sheet_data = search_in_sheet(extracted_keywords, warehouse) if extracted_keywords else ""
-    web_data = search_web(extracted_keywords) if (extracted_keywords and mode == "analog") else ""
+    # Загружаем контекст из таблиц (если текст пустой, подтягиваем базовый срез для сверки с фото)
+    sheet_data = search_in_sheet(extracted_keywords, warehouse)
+    web_data = search_web(text) if (text and mode == "analog") else ""
 
     reply_text = ask_gigachat(text, sheet_data, web_data, image_file_id, mode, warehouse)
     return {'reply': reply_text}
