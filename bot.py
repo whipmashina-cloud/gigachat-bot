@@ -58,20 +58,16 @@ def search_in_sheet(query_text, warehouse_filter="all"):
                 if row not in matched_rows:
                     matched_rows.append(row)
                     
-        top_rows = matched_rows[:15]
+        top_rows = matched_rows[:12]
         if not top_rows:
             return ""
             
-        result_text = "Данные из внутренней базы Google Таблицы предприятия:\n"
+        result_text = "Найденные позиции из базы данных предприятия:\n"
         for r in top_rows:
-            code = r[0] if len(r) > 0 else ""
-            name = r[1] if len(r) > 1 else ""
-            equipment = r[2] if len(r) > 2 else ""
-            warehouse = r[3] if len(r) > 3 else ""
-            place = r[4] if len(r) > 4 else ""
-            desc = r[5] if len(r) > 5 else ""
-            status = r[6] if len(r) > 6 else ""
-            result_text += f"• Код: {code} | Название: {name} | Оборудование: {equipment} | Склад: {warehouse} ({place}) | Описание: {desc} | Статус: {status}\n"
+            # Собираем все заполненные ячейки строки автоматически, чтобы не терять данные
+            clean_cells = [cell.strip() for cell in r if cell.strip()]
+            if clean_cells:
+                result_text += f"• " + " | ".join(clean_cells) + "\n"
             
         return result_text
     except Exception as e:
@@ -115,19 +111,19 @@ def ask_gigachat(prompt, sheet_context, web_context, image_file_id=None, mode="s
         'Authorization': f'Bearer {token}'
     }
     
-    wh_names = {"all": "Все склады", "wh1": "Основной склад деталей", "wh2": "Склад оборудования и агрегатов"}
+    wh_names = {"all": "Все склады", "wh1": "Склад №1 (Детали)", "wh2": "Склад №2 (Оборудование)"}
     selected_wh = wh_names.get(warehouse, "Все склады")
 
     mode_instructions = {
-        "search": "Режим: Быстрый поиск остатков и ячеек. Отвечай кратко, чётко указывая код, место хранения и статус.",
-        "scan": "Режим: Сканирование шильдика/детали. Сфокусируйся на распознавании текста, артикулов, параметров с фото.",
-        "analog": "Режим: Подбор аналогов и заменой. Предложи доступные аналоги и взаимозаменяемые детали."
+        "search": "Режим: Поиск остатков. Выдавай полную информацию из таблиц (наименования, артикулы, оборудование, ячейки хранения).",
+        "scan": "Режим: Сканирование шильдика/детали. Сфокусируйся на распознавании маркировок и сопоставлении с позициями базы.",
+        "analog": "Режим: Подбор аналогов. Предложи взаимозаменяемые позиции."
     }
 
     system_prompt = (
         f"Ты главный инженер по оборудованию и складской логистике. Выбран склад: '{selected_wh}'. "
         f"{mode_instructions.get(mode, '')} "
-        "Анализируй запросы, изображения, данные из таблиц и интернета."
+        "Анализируй запросы, изображения, данные из таблиц и интернета. Выдавай развёрнутые и понятные ответы."
     )
     
     combined_context = ""
@@ -162,7 +158,7 @@ def ask_gigachat(prompt, sheet_context, web_context, image_file_id=None, mode="s
     except Exception as e:
         return f"Ошибка запроса: {str(e)}"
 
-# Продвинутый PWA-интерфейс с фильтрами складов и режимами
+# PWA Шаблон интерфейса
 CHAT_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="ru">
@@ -206,9 +202,7 @@ CHAT_TEMPLATE = """
             font-size: 18px; box-shadow: 0 0 12px rgba(56, 189, 248, 0.4);
         }
         
-        .controls-bar {
-            display: flex; gap: 8px; width: 100%;
-        }
+        .controls-bar { display: flex; gap: 8px; width: 100%; }
         select {
             background: var(--bg-primary); color: var(--text-main);
             border: 1px solid var(--border); border-radius: 10px;
@@ -302,30 +296,30 @@ CHAT_TEMPLATE = """
         <div class="controls-bar">
             <select id="warehouseSelect">
                 <option value="all">🏢 Все склады</option>
-                <option value="wh1">📦 Склад №1 (Детали)</option>
-                <option value="wh2">⚙️ Склад №2 (Оборудование)</option>
+                <option value="wh1">📦 Склад №1</option>
+                <option value="wh2">⚙️ Склад №2</option>
             </select>
             <select id="modeSelect">
-                <option value="search">🔎 Режим: Поиск</option>
-                <option value="scan">📷 Режим: Сканер</option>
-                <option value="analog">🛠️ Режим: Аналоги</option>
+                <option value="search">🔎 Поиск</option>
+                <option value="scan">📷 Сканер</option>
+                <option value="analog">🛠️ Аналоги</option>
             </select>
         </div>
     </header>
 
     <div id="chat-container">
-        <div class="message bot">👋 Приветствую! Выберите склад и режим работы выше.\n\nЗадайте вопрос, укажите артикул или прикрепите фото шильдика/детали.</div>
+        <div class="message bot">👋 Приветствую! Выберите склад и режим работы выше.\n\nЗадайте вопрос, укажите артикул или прикрепите фото.</div>
     </div>
 
     <div class="quick-actions">
         <div class="chip" onclick="quickSend('Где лежит подшипник?')">🔍 Где лежит деталь?</div>
-        <div class="chip" onclick="quickSend('Проверь статус ремня')">📋 Проверить статус</div>
-        <div class="chip" onclick="quickSend('Найди аналоги для насоса')">🛠️ Подобрать аналоги</div>
+        <div class="chip" onclick="quickSend('Проверь статус оборудования')">📋 Проверить статус</div>
+        <div class="chip" onclick="quickSend('Подобрать аналог ремня')">🛠️ Подобрать аналоги</div>
     </div>
 
     <div class="preview-area" id="previewArea">
         <img id="previewImage" class="preview-img" src="" alt="preview">
-        <span style="font-size: 13px; color: var(--text-muted);">Снимок прикреплен</span>
+        <span style="font-size: 13px; color: var(--text-muted);">Фото прикреплено</span>
         <span class="remove-img" onclick="clearImage()">Удалить</span>
     </div>
 
@@ -333,7 +327,7 @@ CHAT_TEMPLATE = """
         <label class="icon-btn" title="Сделать фото">
             📷 <input type="file" id="imageInput" accept="image/*" onchange="handleImageSelect(event)">
         </label>
-        <input type="text" id="messageInput" placeholder="Артикул или название..." autocomplete="off">
+        <input type="text" id="messageInput" placeholder="Артикул или наименование..." autocomplete="off">
         <button type="submit" class="send-btn">➔</button>
     </form>
 
@@ -396,8 +390,9 @@ CHAT_TEMPLATE = """
             container.scrollTop = container.scrollHeight;
 
             const loadDiv = document.createElement('div');
+            loadDiv.className.id = 'loadMsg';
             loadDiv.className = 'message bot';
-            loadDiv.innerHTML = '<span class="loading-pulse">⚡ Обработка запроса по складу...</span>';
+            loadDiv.innerHTML = '<span class="loading-pulse">⚡ Анализирую базу и склад...</span>';
             container.appendChild(loadDiv);
             container.scrollTop = container.scrollHeight;
 
