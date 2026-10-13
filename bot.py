@@ -9,11 +9,10 @@ app = Flask(__name__)
 GIGACHAT_AUTH_KEY = os.environ.get("GIGACHAT_AUTH_KEY")
 SPREADSHEET_ID = "115OqjWSWuKFUuZNBomimcbvPsf_c6cyqmBgrFWyFSVE"
 
-# Четкое разделение листов Google Таблицы по выбору в интерфейсе
 SHEET_GIDS = {
-    "all": ["0", "1433962862", "1202844813"], # Все листы вместе
-    "sheet1": ["0", "1433962862"],            # Старые листы (Лист 1 и смежные)
-    "goods": ["1202844813"]                  # Отдельно новый лист «Товары»
+    "all": ["0", "1433962862", "1202844813"],
+    "sheet1": ["0", "1433962862"],
+    "goods": ["1202844813"]
 }
 
 def get_gigachat_token():
@@ -59,14 +58,12 @@ def search_in_sheet(query_text, warehouse_filter="all"):
                 if row not in matched_rows:
                     matched_rows.append(row)
                     
-        top_rows = matched_rows[:12]
+        top_rows = matched_rows[:8]
         if not top_rows:
             return ""
             
-        source_name = "Лист «Товары»" if warehouse_filter == "goods" else ("Лист 1" if warehouse_filter == "sheet1" else "Все базы")
-        result_text = f"Найденные позиции (Источник: {source_name}):\n"
+        result_text = "Найденные позиции из базы:\n"
         for r in top_rows:
-            # Собираем абсолютно все заполненные ячейки строки
             clean_cells = [cell.strip() for cell in r if cell.strip()]
             if clean_cells:
                 result_text += f"• " + " | ".join(clean_cells) + "\n"
@@ -113,19 +110,16 @@ def ask_gigachat(prompt, sheet_context, web_context, image_file_id=None, mode="s
         'Authorization': f'Bearer {token}'
     }
     
-    wh_names = {"all": "Все листы и базы", "sheet1": "Лист 1 (Основной)", "goods": "Лист «Товары»"}
-    selected_wh = wh_names.get(warehouse, "Все листы")
+    wh_names = {"all": "Все базы", "sheet1": "Лист 1 (Основной)", "goods": "Лист «Товары»"}
+    selected_wh = wh_names.get(warehouse, "Все базы")
 
-    mode_instructions = {
-        "search": f"Режим: Поиск. Источник: {selected_wh}. Выдавай полную информацию из таблиц (наименования, артикулы, описания, единицы).",
-        "scan": "Режим: Сканирование шильдика/детали. Сфокусируйся на распознавании маркировок и сопоставлении с базой.",
-        "analog": "Режим: Подобрать аналоги. Предложи взаимозаменяемые позиции."
-    }
-
+    # Жесткие правила оформления для ИИ
     system_prompt = (
-        f"Ты главный инженер по оборудованию и складской логистике. Выбранный источник данных: '{selected_wh}'. "
-        f"{mode_instructions.get(mode, '')} "
-        "Анализируй запросы, изображения, данные из таблиц и интернета. Выдавай развёрнутые и понятные ответы."
+        f"Ты главный инженер по оборудованию и складской логистике. Источник: '{selected_wh}'. "
+        "Твоя задача — отвечать предельно коротко, четко, по делу и человеческим языком. "
+        "КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО рисовать таблицы с помощью палочек (|) и дефисов (-). "
+        "Не пиши вводных фраз вроде 'В предоставленных данных имеется...', 'Таким образом...' и разделов типа 'Заключение'. "
+        "Пиши сразу суть: название детали, артикул, где лежит (склад/место) и статус."
     )
     
     combined_context = ""
@@ -146,8 +140,8 @@ def ask_gigachat(prompt, sheet_context, web_context, image_file_id=None, mode="s
             {"role": "system", "content": system_prompt},
             user_message
         ],
-        "temperature": 0.3,
-        "max_tokens": 1200
+        "temperature": 0.2,
+        "max_tokens": 800
     }
     
     try:
@@ -160,7 +154,6 @@ def ask_gigachat(prompt, sheet_context, web_context, image_file_id=None, mode="s
     except Exception as e:
         return f"Ошибка запроса: {str(e)}"
 
-# PWA Шаблон интерфейса
 CHAT_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="ru">
@@ -297,7 +290,7 @@ CHAT_TEMPLATE = """
         </div>
         <div class="controls-bar">
             <select id="warehouseSelect">
-                <option value="all">🏢 Все листы вместе</option>
+                <option value="all">🏢 Все базы вместе</option>
                 <option value="sheet1">📋 Лист 1 (Основной)</option>
                 <option value="goods">🏷️ Лист «Товары»</option>
             </select>
@@ -310,13 +303,13 @@ CHAT_TEMPLATE = """
     </header>
 
     <div id="chat-container">
-        <div class="message bot">👋 Приветствую! Теперь листы разделены в меню выше.\n\nВы можете искать отдельно по Листу 1, отдельно по Листу «Товары» или по всем сразу.</div>
+        <div class="message bot">👋 Приветствую! Задайте артикул или название — выдам всю информацию кратко и без лишней воды.</div>
     </div>
 
     <div class="quick-actions">
-        <div class="chip" onclick="quickSend('Захват кег')">🔍 Захват кег</div>
-        <div class="chip" onclick="quickSend('Рольганг')">📦 Рольганг</div>
-        <div class="chip" onclick="quickSend('Ремкомплект')">🛠️ Ремкомплект</div>
+        <div class="chip" onclick="quickSend('Диодный мост')">🔍 Диодный мост</div>
+        <div class="chip" onclick="quickSend('Захват кег')">📦 Захват кег</div>
+        <div class="chip" onclick="quickSend('Рольганг')">⚙️ Рольганг</div>
     </div>
 
     <div class="preview-area" id="previewArea">
@@ -351,7 +344,7 @@ CHAT_TEMPLATE = """
         }
 
         function clearImage() {
-            document.getElementById('imageInput'].value = '';
+            document.getElementById('imageInput').value = '';
             document.getElementById('previewArea').style.display = 'none';
         }
 
@@ -393,7 +386,7 @@ CHAT_TEMPLATE = """
 
             const loadDiv = document.createElement('div');
             loadDiv.className = 'message bot';
-            loadDiv.innerHTML = '<span class="loading-pulse">⚡ Ищу по выбранному источнику...</span>';
+            loadDiv.innerHTML = '<span class="loading-pulse">⚡ Ищу позицию...</span>';
             container.appendChild(loadDiv);
             container.scrollTop = container.scrollHeight;
 
