@@ -146,160 +146,51 @@ def ask_gigachat(prompt, sheet_context, web_context, image_file_id=None):
     except Exception as e:
         return f"Ошибка запроса: {str(e)}"
 
-# Главная HTML-страница PWA
+# Новый ультрасовременный интерфейс
 CHAT_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <link rel="manifest" href="/manifest.json">
-    <meta name="theme-color" content="#1976d2">
-    <title>AI Складской Помощник</title>
+    <meta name="theme-color" content="#0f172a">
+    <title>Склад AI</title>
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f0f2f5; margin: 0; padding: 0; display: flex; flex-direction: column; height: 100vh; }
-        header { background: #1976d2; color: white; padding: 15px; text-align: center; font-size: 18px; font-weight: bold; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-        #chat-container { flex: 1; overflow-y: auto; padding: 15px; display: flex; flex-direction: column; gap: 10px; }
-        .message { max-width: 80%; padding: 12px 16px; border-radius: 12px; line-height: 1.4; word-break: break-word; white-space: pre-wrap; }
-        .user { background: #dcf8c6; align-self: flex-end; border-bottom-right-radius: 2px; }
-        .bot { background: white; align-self: flex-start; border-bottom-left-radius: 2px; box-shadow: 0 1px 2px rgba(0,0,0,0.1); }
-        #input-form { background: white; padding: 10px 15px; display: flex; gap: 10px; box-shadow: 0 -2px 5px rgba(0,0,0,0.05); align-items: center; }
-        input[type="text"] { flex: 1; padding: 10px 14px; border: 1px solid #ccc; border-radius: 20px; outline: none; font-size: 16px; }
-        input[type="file"] { display: none; }
-        .file-btn { background: #e0e0e0; border: none; border-radius: 50%; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 18px; }
-        button.send-btn { background: #1976d2; color: white; border: none; padding: 10px 20px; border-radius: 20px; font-weight: bold; cursor: pointer; }
-        .loading { font-style: italic; color: #888; }
-    </style>
-</head>
-<body>
-    <header>🏭 AI Склад и Оборудование</header>
-    <div id="chat-container">
-        <div class="message bot">Здравствуйте! Я ваш инженерный помощник. Напишите запрос, артикул или прикрепите фото детали для анализа.</div>
-    </div>
-    <form id="input-form" onsubmit="sendMessage(event)">
-        <label class="file-btn" title="Прикрепить фото">📷<input type="file" id="imageInput" accept="image/*"></label>
-        <input type="text" id="messageInput" placeholder="Введите сообщение или артикул..." autocomplete="off">
-        <button type="submit" class="send-btn">Отправить</button>
-    </form>
-
-    <script>
-        if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('/sw.js');
+        :root {
+            --bg-primary: #0f172a;
+            --bg-secondary: #1e293b;
+            --accent: #38bdf8;
+            --accent-gradient: linear-gradient(135deg, #38bdf8 0%, #3b82f6 100%);
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --user-bubble: #1e3a8a;
+            --bot-bubble: #1e293b;
+            --border: #334155;
         }
 
-        async function sendMessage(e) {
-            e.preventDefault();
-            const msgInput = document.getElementById('messageInput');
-            const imgInput = document.getElementById('imageInput');
-            const container = document.getElementById('chat-container');
-
-            const text = msgInput.value.trim();
-            const file = imgInput.files;
-
-            if (!text && file.length === 0) return;
-
-            const userDiv = document.createElement('div');
-            userDiv.className = 'message user';
-            userDiv.innerText = text + (file.length > 0 ? " [Прикреплено фото]" : "");
-            container.appendChild(userDiv);
-
-            const formData = new FormData();
-            formData.append('text', text);
-            if (file.length > 0) {
-                formData.append('image', file[0]);
-            }
-
-            msgInput.value = '';
-            imgInput.value = '';
-            container.scrollTop = container.scrollHeight;
-
-            const loadDiv = document.createElement('div');
-            loadDiv.className = 'message bot loading';
-            loadDiv.innerText = 'Анализирую данные и таблицы... ⏳';
-            container.appendChild(loadDiv);
-            container.scrollTop = container.scrollHeight;
-
-            try {
-                const response = await fetch('/api/chat', { method: 'POST', body: formData });
-                const data = await response.json();
-                
-                loadDiv.remove();
-
-                const botDiv = document.createElement('div');
-                botDiv.className = 'message bot';
-                botDiv.innerText = data.reply;
-                container.appendChild(botDiv);
-            } catch (err) {
-                loadDiv.remove();
-                const errDiv = document.createElement('div');
-                errDiv.className = 'message bot';
-                errDiv.innerText = 'Ошибка соединения с сервером.';
-                container.appendChild(errDiv);
-            }
-            container.scrollTop = container.scrollHeight;
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-main);
+            margin: 0; padding: 0;
+            display: flex; flex-direction: column; height: 100vh;
         }
-    </script>
-</body>
-</html>
-"""
 
-# Манифест для PWA
-MANIFEST_JSON = """{
-  "name": "AI Складской Помощник",
-  "short_name": "Склад AI",
-  "start_url": "/",
-  "display": "standalone",
-  "background_color": "#ffffff",
-  "theme_color": "#1976d2",
-  "icons": [
-    {
-      "src": "https://cdn-icons-png.flaticon.com/512/3061/3061341.png",
-      "sizes": "512x512",
-      "type": "image/png"
-    }
-  ]
-}"""
-
-# Service Worker для PWA
-SERVICE_WORKER_JS = """
-self.addEventListener('install', (e) => {
-  self.skipWaiting();
-});
-self.addEventListener('fetch', (e) => {
-  e.respondWith(fetch(e.request));
-});
-"""
-
-@app.route('/')
-def index():
-    return render_template_string(CHAT_TEMPLATE)
-
-@app.route('/manifest.json')
-def manifest():
-    return Response(MANIFEST_JSON, mimetype='application/json')
-
-@app.route('/sw.js')
-def service_worker():
-    return Response(SERVICE_WORKER_JS, mimetype='application/javascript')
-
-@app.route('/api/chat', methods=['POST'])
-def api_chat():
-    text = request.form.get('text', '')
-    image_file_id = None
-
-    if 'image' in request.files:
-        img_file = request.files['image']
-        if img_file.filename != '':
-            img_bytes = img_file.read()
-            token = get_gigachat_token()
-            if token:
-                image_file_id = upload_image_to_gigachat(token, img_bytes)
-
-    sheet_data = search_in_sheet(text) if text else ""
-    web_data = search_web(text) if text else ""
-
-    reply_text = ask_gigachat(text, sheet_data, web_data, image_file_id)
-    return {'reply': reply_text}
-
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=10000)
+        header {
+            background: rgba(30, 41, 59, 0.8);
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--border);
+            padding: 14px 20px;
+            display: flex; align-items: center; justify-content: space-between;
+            position: sticky; top: 0; z-index: 10;
+        }
+        .logo-box { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 18px; }
+        .logo-icon {
+            width: 34px; height: 34px; background: var(--accent-gradient);
+            border-radius: 10px; display: flex; align-items: center; justify-content: center;
+            font-size: 18px; box-shadow: 0 0 12px rgba(56, 189, 248, 0.4);
+        }
+        .status-badge {
+            background: rgba(3
