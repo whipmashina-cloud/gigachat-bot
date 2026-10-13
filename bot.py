@@ -58,7 +58,6 @@ def get_combined_warehouse_data(mode="all"):
         if not header:
             header = rows[0]
             combined_data.append(header)
-        # Добавляем строки данных без повтора заголовков
         combined_data.extend(rows[1:])
         
     if not header:
@@ -69,7 +68,7 @@ def get_combined_warehouse_data(mode="all"):
     writer.writerows(combined_data)
     return output.getvalue()
 
-# --- ВАШ ВЕБ-ИНТЕРФЕЙС СО ВСТРОЕННЫМ ГОЛОСОВЫМ ПОМОЩНИКОМ ---
+# --- ПОЛНЫЙ HTML-ШАБЛОН С ИНТЕГРИРОВАННЫМ МИКРОФОНОМ И ОЗВУЧКОЙ ---
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="ru">
@@ -165,7 +164,7 @@ HTML_TEMPLATE = """
     <h2>📦 Склад AI — Управление складом</h2>
     
     <div id="chat-box">
-        <div class="message ai"><strong>Система:</strong><br>Привет! Задайте вопрос текстом или нажмите кнопку микрофона для голосового поиска.</div>
+        <div class="message ai"><strong>Система:</strong><br>Привет! Задайте вопрос текстом или нажмите кнопку микрофона 🎤 для голосового поиска.</div>
     </div>
     
     <div id="voice-status">Готов к работе.</div>
@@ -204,7 +203,7 @@ HTML_TEMPLATE = """
             userInput.value = speechText;
             voiceStatus.textContent = `✅ Распознано: "${speechText}"`;
             micBtn.classList.remove('recording');
-            sendMessage(); // Автоматическая отправка запроса после голоса
+            sendMessage(); // Автоматическая отправка запроса после распознавания
         };
 
         recognition.onerror = (event) => {
