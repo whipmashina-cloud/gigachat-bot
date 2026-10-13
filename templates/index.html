@@ -1,1 +1,212 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Склад AI — Голосовой помощник</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f6f9;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+        }
+        .container {
+            width: 100%;
+            max-width: 700px;
+            background: #ffffff;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+        h2 { text-align: center; color: #333; margin-top: 0; }
+        #chat-box {
+            height: 420px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 15px;
+            overflow-y: auto;
+            background: #fafafa;
+            margin-bottom: 15px;
+            font-size: 14px;
+        }
+        .message {
+            margin-bottom: 12px;
+            padding: 10px 14px;
+            border-radius: 8px;
+            line-height: 1.4;
+            white-space: pre-wrap;
+        }
+        .message.user { background: #e3f2fd; text-align: right; }
+        .message.ai { background: #e8f5e9; text-align: left; }
+        .controls {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        input[type="text"] {
+            flex: 1;
+            padding: 12px;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            font-size: 16px;
+        }
+        button {
+            padding: 12px 18px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 16px;
+            color: #fff;
+            background: #007bff;
+            transition: background 0.2s;
+        }
+        button:hover { background: #0056b3; }
+        #mic-btn {
+            background: #28a745;
+            font-size: 18px;
+            padding: 12px 16px;
+        }
+        #mic-btn.recording {
+            background: #dc3545;
+            animation: pulse 1.5s infinite;
+        }
+        #voice-status {
+            font-size: 12px;
+            color: #666;
+            margin-top: 6px;
+            text-align: center;
+        }
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+            100% { transform: scale(1); }
+        }
+    </style>
+</head>
+<body>
 
+<div class="container">
+    <h2>📦 Склад AI — Управление складом</h2>
+    
+    <div id="chat-box">
+        <div class="message ai"><strong>Система:</strong><br>Привет! Задайте вопрос текстом или нажмите кнопку микрофона 🎤 для голосового поиска.</div>
+    </div>
+    
+    <div id="voice-status">Готов к работе.</div>
+
+    <div class="controls" style="margin-top: 10px;">
+        <input type="text" id="user-input" placeholder="Введите наименование детали или артикул...">
+        <button id="mic-btn" title="Голосовой ввод">🎤</button>
+        <button id="send-btn">Найти</button>
+    </div>
+</div>
+
+<script>
+    const chatBox = document.getElementById('chat-box');
+    const userInput = document.getElementById('user-input');
+    const sendBtn = document.getElementById('send-btn');
+    const micBtn = document.getElementById('mic-btn');
+    const voiceStatus = document.getElementById('voice-status');
+
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    let recognition = null;
+
+    if (SpeechRecognition) {
+        recognition = new SpeechRecognition();
+        recognition.lang = 'ru-RU';
+        recognition.interimResults = false;
+        recognition.maxAlternatives = 1;
+
+        recognition.onstart = () => {
+            voiceStatus.textContent = "🎤 Слушаю вас... Говорите запрос.";
+            micBtn.classList.add('recording');
+        };
+
+        recognition.onresult = (event) => {
+            const speechText = event.results[0][0].transcript;
+            userInput.value = speechText;
+            voiceStatus.textContent = `✅ Распознано: "${speechText}"`;
+            micBtn.classList.remove('recording');
+            sendMessage();
+        };
+
+        recognition.onerror = (event) => {
+            voiceStatus.textContent = `❌ Ошибка микрофона: ${event.error}`;
+            micBtn.classList.remove('recording');
+        };
+
+        recognition.onend = () => {
+            micBtn.classList.remove('recording');
+        };
+    } else {
+        voiceStatus.textContent = "⚠️ Голосовой ввод не поддерживается вашим браузером (рекомендуется Chrome).";
+        micBtn.style.display = 'none';
+    }
+
+    micBtn.addEventListener('click', () => {
+        if (recognition) {
+            try {
+                recognition.start();
+            } catch (e) {
+                console.error(e);
+            }
+        }
+    });
+
+    function speakText(text) {
+        if ('speechSynthesis' in window) {
+            window.speechSynthesis.cancel();
+            const cleanText = text.replace(/<[^>]*>?/gm, '');
+            const utterance = new SpeechSynthesisUtterance(cleanText);
+            utterance.lang = 'ru-RU';
+            utterance.rate = 1.0;
+            window.speechSynthesis.speak(utterance);
+        }
+    }
+
+    async function sendMessage() {
+        const text = userInput.value.trim();
+        if (!text) return;
+
+        appendMessage('Вы', text, 'user');
+        userInput.value = '';
+        voiceStatus.textContent = "Ищем данные...";
+
+        try {
+            const response = await fetch('/api/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message: text })
+            });
+            const data = await response.json();
+            
+            const reply = data.reply || "Нет ответа.";
+            appendMessage('Склад AI', reply, 'ai');
+            voiceStatus.textContent = "Готово.";
+            
+            speakText(reply);
+        } catch (error) {
+            appendMessage('Система', 'Ошибка связи с сервером.', 'ai');
+            voiceStatus.textContent = "Ошибка сети.";
+        }
+    }
+
+    sendBtn.addEventListener('click', sendMessage);
+    userInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') sendMessage();
+    });
+
+    function appendMessage(sender, text, className) {
+        const div = document.createElement('div');
+        div.className = `message ${className}`;
+        div.innerHTML = `<strong>${sender}:</strong><br>${text}`;
+        chatBox.appendChild(div);
+        chatBox.scrollTop = chatBox.scrollHeight;
+    }
+</script>
+
+</body>
+</html>
