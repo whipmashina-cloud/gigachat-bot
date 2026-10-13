@@ -8,11 +8,12 @@ app = Flask(__name__)
 
 GIGACHAT_AUTH_KEY = os.environ.get("GIGACHAT_AUTH_KEY")
 SPREADSHEET_ID = "115OqjWSWuKFUuZNBomimcbvPsf_c6cyqmBgrFWyFSVE"
-# Маппинг складов на GID листов Google Таблицы
+
+# Маппинг листов Google Таблицы (включая новый лист «Товары»)
 SHEET_GIDS = {
-    "all": ["0", "1433962862"],
-    "wh1": ["0"],
-    "wh2": ["1433962862"]
+    "all": ["0", "1433962862", "1202844813"],
+    "wh1": ["0", "1202844813"],     # Основной склад + Товары
+    "wh2": ["1433962862"]          # Склад оборудования
 }
 
 def get_gigachat_token():
@@ -64,7 +65,7 @@ def search_in_sheet(query_text, warehouse_filter="all"):
             
         result_text = "Найденные позиции из базы данных предприятия:\n"
         for r in top_rows:
-            # Собираем все заполненные ячейки строки автоматически, чтобы не терять данные
+            # Собираем абсолютно все заполненные ячейки строки
             clean_cells = [cell.strip() for cell in r if cell.strip()]
             if clean_cells:
                 result_text += f"• " + " | ".join(clean_cells) + "\n"
@@ -111,17 +112,17 @@ def ask_gigachat(prompt, sheet_context, web_context, image_file_id=None, mode="s
         'Authorization': f'Bearer {token}'
     }
     
-    wh_names = {"all": "Все склады", "wh1": "Склад №1 (Детали)", "wh2": "Склад №2 (Оборудование)"}
+    wh_names = {"all": "Все склады и листы", "wh1": "Склад №1 + Товары", "wh2": "Склад оборудования"}
     selected_wh = wh_names.get(warehouse, "Все склады")
 
     mode_instructions = {
-        "search": "Режим: Поиск остатков. Выдавай полную информацию из таблиц (наименования, артикулы, оборудование, ячейки хранения).",
+        "search": "Режим: Поиск остатков. Выдавай полную информацию из таблиц (наименования, артикулы, блокировки, описания, единицы измерения).",
         "scan": "Режим: Сканирование шильдика/детали. Сфокусируйся на распознавании маркировок и сопоставлении с позициями базы.",
-        "analog": "Режим: Подбор аналогов. Предложи взаимозаменяемые позиции."
+        "analog": "Режим: Подобрать аналоги. Предложи взаимозаменяемые позиции."
     }
 
     system_prompt = (
-        f"Ты главный инженер по оборудованию и складской логистике. Выбран склад: '{selected_wh}'. "
+        f"Ты главный инженер по оборудованию и складской логистике. Выбран контекст: '{selected_wh}'. "
         f"{mode_instructions.get(mode, '')} "
         "Анализируй запросы, изображения, данные из таблиц и интернета. Выдавай развёрнутые и понятные ответы."
     )
@@ -295,9 +296,9 @@ CHAT_TEMPLATE = """
         </div>
         <div class="controls-bar">
             <select id="warehouseSelect">
-                <option value="all">🏢 Все склады</option>
-                <option value="wh1">📦 Склад №1</option>
-                <option value="wh2">⚙️ Склад №2</option>
+                <option value="all">🏢 Все базы и листы</option>
+                <option value="wh1">📦 Склад №1 + Товары</option>
+                <option value="wh2">⚙️ Склад оборудования</option>
             </select>
             <select id="modeSelect">
                 <option value="search">🔎 Поиск</option>
@@ -308,13 +309,13 @@ CHAT_TEMPLATE = """
     </header>
 
     <div id="chat-container">
-        <div class="message bot">👋 Приветствую! Выберите склад и режим работы выше.\n\nЗадайте вопрос, укажите артикул или прикрепите фото.</div>
+        <div class="message bot">👋 Приветствую! Теперь поиск ведется сразу по всем листам, включая новые «Товары».\n\nВведите артикул, название или прикрепите фото.</div>
     </div>
 
     <div class="quick-actions">
-        <div class="chip" onclick="quickSend('Где лежит подшипник?')">🔍 Где лежит деталь?</div>
-        <div class="chip" onclick="quickSend('Проверь статус оборудования')">📋 Проверить статус</div>
-        <div class="chip" onclick="quickSend('Подобрать аналог ремня')">🛠️ Подобрать аналоги</div>
+        <div class="chip" onclick="quickSend('Захват кег')">🔍 Захват кег</div>
+        <div class="chip" onclick="quickSend('Рольганг')">📦 Рольганг</div>
+        <div class="chip" onclick="quickSend('Ремкомплект')">🛠️ Ремкомплект</div>
     </div>
 
     <div class="preview-area" id="previewArea">
@@ -390,9 +391,8 @@ CHAT_TEMPLATE = """
             container.scrollTop = container.scrollHeight;
 
             const loadDiv = document.createElement('div');
-            loadDiv.className.id = 'loadMsg';
             loadDiv.className = 'message bot';
-            loadDiv.innerHTML = '<span class="loading-pulse">⚡ Анализирую базу и склад...</span>';
+            loadDiv.innerHTML = '<span class="loading-pulse">⚡ Ищу по всем листам базы...</span>';
             container.appendChild(loadDiv);
             container.scrollTop = container.scrollHeight;
 
