@@ -58,15 +58,15 @@ def search_in_sheet(query_text, warehouse_filter="all"):
                 if row not in matched_rows:
                     matched_rows.append(row)
                     
-        top_rows = matched_rows[:8]
+        top_rows = matched_rows[:6]
         if not top_rows:
             return ""
             
-        result_text = "Найденные позиции из базы:\n"
+        result_text = "Сырые данные из базы:\n"
         for r in top_rows:
             clean_cells = [cell.strip() for cell in r if cell.strip()]
             if clean_cells:
-                result_text += f"• " + " | ".join(clean_cells) + "\n"
+                result_text += " | ".join(clean_cells) + "\n"
             
         return result_text
     except Exception as e:
@@ -113,13 +113,14 @@ def ask_gigachat(prompt, sheet_context, web_context, image_file_id=None, mode="s
     wh_names = {"all": "Все базы", "sheet1": "Лист 1 (Основной)", "goods": "Лист «Товары»"}
     selected_wh = wh_names.get(warehouse, "Все базы")
 
-    # Жесткие правила оформления для ИИ
+    # Улучшенный системный промпт: строго человеческий формат без разделителей и воды
     system_prompt = (
-        f"Ты главный инженер по оборудованию и складской логистике. Источник: '{selected_wh}'. "
-        "Твоя задача — отвечать предельно коротко, четко, по делу и человеческим языком. "
-        "КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО рисовать таблицы с помощью палочек (|) и дефисов (-). "
-        "Не пиши вводных фраз вроде 'В предоставленных данных имеется...', 'Таким образом...' и разделов типа 'Заключение'. "
-        "Пиши сразу суть: название детали, артикул, где лежит (склад/место) и статус."
+        f"Ты профессиональный складской помощник. Источник: '{selected_wh}'. "
+        "Твоя задача — преобразовать сырые данные из базы в аккуратный, красивый и понятный ответ для сотрудника на складе. "
+        "ОФОРМЛЕНИЕ:\n"
+        "1. Пиши без палочек (|), дефисов и технических символов.\n"
+        "2. Выдавай информацию в виде аккуратных строк или коротких пунктов (Название, Артикул/Код, Наличие/Статус, Место хранения).\n"
+        "3. Никакой лишней воды, вводных фраз ('В предоставленных данных...', 'Таким образом...') и заключений. Только факты."
     )
     
     combined_context = ""
@@ -140,8 +141,8 @@ def ask_gigachat(prompt, sheet_context, web_context, image_file_id=None, mode="s
             {"role": "system", "content": system_prompt},
             user_message
         ],
-        "temperature": 0.2,
-        "max_tokens": 800
+        "temperature": 0.1,
+        "max_tokens": 600
     }
     
     try:
@@ -303,13 +304,13 @@ CHAT_TEMPLATE = """
     </header>
 
     <div id="chat-container">
-        <div class="message bot">👋 Приветствую! Задайте артикул или название — выдам всю информацию кратко и без лишней воды.</div>
+        <div class="message bot">👋 Приветствую! Введите артикул или название — выдам результат в чистом и удобном виде.</div>
     </div>
 
     <div class="quick-actions">
         <div class="chip" onclick="quickSend('Диодный мост')">🔍 Диодный мост</div>
-        <div class="chip" onclick="quickSend('Захват кег')">📦 Захват кег</div>
         <div class="chip" onclick="quickSend('Рольганг')">⚙️ Рольганг</div>
+        <div class="chip" onclick="quickSend('Захват кег')">📦 Захват кег</div>
     </div>
 
     <div class="preview-area" id="previewArea">
