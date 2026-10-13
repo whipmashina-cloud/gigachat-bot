@@ -106,9 +106,11 @@ def upload_image_to_gigachat(token, image_bytes):
         response = requests.post(url, headers=headers, files=files, data=data, verify=False)
         if response.status_code == 200:
             res_json = response.json()
-            return res_json.get('id')
+            file_id = res_json.get('id')
+            print(f"Image uploaded successfully to GigaChat, file_id: {file_id}")
+            return file_id
         else:
-            print(f"Failed to upload image to GigaChat: {response.text}")
+            print(f"Failed to upload image to GigaChat: {response.status_code} - {response.text}")
     except Exception as e:
         print(f"Error uploading image: {e}")
     return None
@@ -128,8 +130,9 @@ def ask_gigachat(prompt, sheet_context, web_context, image_file_id=None):
     
     system_prompt = (
         "Ты главный инженер по оборудованию и складской логистике. "
-        "Анализируй присланные изображения (детали, узлы, маркировки, запчасти), а также данные из внутренней базы Google Таблицы "
-        "и интернета. Помогай идентифицировать запчасти, определять их назначение, предлагать аналоги и указывать места хранения, если они есть в базе."
+        "Внимательно анализируй прикрепленные изображения деталей, узлов или шильдиков, а также текстовый запрос. "
+        "Используй данные из внутренней базы Google Таблицы и интернета, чтобы точно идентифицировать деталь, "
+        "описать её характеристики, предложить аналоги и указать место хранения на складе, если она есть в базе."
     )
     
     combined_context = ""
@@ -138,7 +141,7 @@ def ask_gigachat(prompt, sheet_context, web_context, image_file_id=None):
     if web_context:
         combined_context += f"{web_context}\n\n"
         
-    user_text = f"{combined_context}Запрос пользователя: {prompt if prompt else 'Что изображено на фото? Распознай деталь.'}"
+    user_text = f"{combined_context}Запрос пользователя: {prompt if prompt else 'Что изображено на фото? Распознай деталь, опиши её и дай техническую справку.'}"
 
     user_message = {
         "role": "user",
@@ -161,10 +164,16 @@ def ask_gigachat(prompt, sheet_context, web_context, image_file_id=None):
     try:
         response = requests.post(url, headers=headers, json=payload, verify=False)
         res_data = response.json()
-        return res_data['choices'][0]['message']['content']
+        print(f"GigaChat response status: {response.status_code}")
+        
+        if 'choices' in res_data and len(res_data['choices']) > 0:
+            return res_data['choices'][0]['message']['content']
+        else:
+            print(f"Unexpected GigaChat response: {res_data}")
+            return "Не удалось получить ответ от модели GigaChat."
     except Exception as e:
         print(f"GigaChat error: {e}")
-        return "Произошла ошибка при анализе изображения или запроса."
+        return "Произошла ошибка при обращении к GigaChat."
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
@@ -173,48 +182,4 @@ def webhook():
         message = data['message']
         chat_id = message['chat']['id']
         
-        text = message.get('text', '') or message.get('caption', '')
-        image_file_id = None
-        
-        if 'photo' in message:
-            photo_file_id = message['photo'][-1]['file_id']
-            # Скачиваем фото из Telegram
-            file_info_url = f"{TELEGRAM_API_URL}/getFile?file_id={photo_file_id}"
-            r = requests.get(file_info_url).json()
-            if r.get("ok"):
-                file_path = r["result"]["file_path"]
-                download_url = f"https://api.telegram.org/file/bot{TELEGRAM_TOKEN}/{file_path}"
-                img_response = requests.get(download_url)
-                if img_response.status_code == 200:
-                    # Получаем токен GigaChat для загрузки файла
-                    token = get_gigachat_token()
-                    if token:
-                        # Загружаем картинку в GigaChat и получаем её file_id
-                        image_file_id = upload_image_to_gigachat(token, img_response.content)
-            
-            if not text:
-                text = "Что это за деталь или узел? Распознай по фото."
-        
-        if text or image_file_id:
-            sheet_data = search_in_sheet(text) if text else ""
-            web_data = search_web(text) if text else ""
-            
-            reply_text = ask_gigachat(text, sheet_data, web_data, image_file_id)
-            send_message(chat_id, reply_text)
-            
-    return 'ok', 200
-
-def send_message(chat_id, text):
-    url = f"{TELEGRAM_API_URL}/sendMessage"
-    payload = {
-        'chat_id': chat_id,
-        'text': text
-    }
-    requests.post(url, json=payload)
-
-@app.route('/')
-def index():
-    return "HELLO, MULTIMODAL HYBRID BOT!"
-
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=10000)
+        text =
