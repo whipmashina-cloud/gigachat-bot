@@ -2,13 +2,12 @@ import os
 import csv
 import io
 import requests
-from PIL import Image
 from flask import Flask, request, render_template_string, Response
 
 app = Flask(__name__)
 
 GIGACHAT_AUTH_KEY = os.environ.get("GIGACHAT_AUTH_KEY")
-SPREADSHEET_ID = "115OqjWSWuKFUuZNBomimcbvPsf_c6cyqmBgrFWyFSVE"
+SPREADSHEET_ID = "115oOjWSwkFUuZnBomimcbvPsf_c6cyqmbgrFwyFSVE"
 
 SHEET_GIDS = {
     "all": ["0", "1433962862", "1202844813"],
@@ -22,7 +21,7 @@ def get_gigachat_token():
     headers = {
         'Content-Type': 'application/x-www-form-urlencoded',
         'Accept': 'application/json',
-        'RqUID': '6f002237-3318-48b6-963a-86716d006324',
+        'RQUID': '6f002237-3318-48b6-86716d006324',
         'Authorization': f'Bearer {GIGACHAT_AUTH_KEY}'
     }
     try:
@@ -32,526 +31,306 @@ def get_gigachat_token():
         print(f"Error getting token: {e}")
         return None
 
-def search_in_sheet(query_text, warehouse_filter="all"):
+def fetch_sheet_data(gid):
+    url = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/export?format=csv&gid={gid}"
     try:
-        all_rows = []
-        gids_to_search = SHEET_GIDS.get(warehouse_filter, SHEET_GIDS["all"])
-        
-        for g in gids_to_search:
-            url = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/export?format=csv&gid={g}"
-            response = requests.get(url, timeout=10)
-            if response.status_code == 200:
-                reader = csv.reader(io.StringIO(response.content.decode('utf-8-sig', errors='ignore')))
-                for row in reader:
-                    if row:
-                        all_rows.append(row)
-                
-        if not all_rows:
-            return "Таблица пуста."
-            
-        if query_text and len(query_text.strip()) > 0:
-            query_words = [w.lower().strip() for w in query_text.split() if len(w) > 1]
-            if not query_words:
-                query_words = [query_text.lower().strip()]
-                
-            matched_rows = []
-            for row in all_rows:
-                row_str = " ".join(row).lower()
-                if any(w in row_str for w in query_words):
-                    if row not in matched_rows:
-                        matched_rows.append(row)
-            
-            top_rows = matched_rows[:20] if matched_rows else all_rows[:25]
-        else:
-            top_rows = all_rows[:25]
-            
-        result_text = "Данные из таблиц базы предприятия:\n"
-        for r in top_rows:
-            clean_cells = [cell.strip() for cell in r if cell.strip()]
-            if clean_cells:
-                result_text += " | ".join(clean_cells) + "\n"
-            
-        return result_text
-    except Exception as e:
-        print(f"Error reading sheets: {e}")
-        return "Ошибка чтения таблиц."
-
-def upload_image_to_gigachat(token, image_bytes):
-    url = "https://gigachat.devices.sberbank.ru/api/v1/files"
-    headers = {'Authorization': f'Bearer {token}'}
-    
-    try:
-        img = Image.open(io.BytesIO(image_bytes))
-        if img.mode in ('RGBA', 'P'):
-            img = img.convert('RGB')
-        
-        img.thumbnail((1000, 1000))
-        output = io.BytesIO()
-        img.save(output, format='JPEG', quality=80)
-        compressed_bytes = output.getvalue()
-
-        files = {'file': ('image.jpg', compressed_bytes, 'image/jpeg')}
-        data = {'purpose': 'general'}
-        
-        response = requests.post(url, headers=headers, files=files, data=data, verify=False, timeout=15)
+        response = requests.get(url, timeout=10)
         if response.status_code == 200:
-            return response.json().get('id')
+            return response.content.decode('utf-8')
     except Exception as e:
-        print(f"Error processing image: {e}")
-    return None
+        print(f"Error fetching sheet {gid}: {e}")
+    return ""
 
-def ask_gigachat(prompt, sheet_context, image_file_id=None, warehouse="all"):
+def get_combined_warehouse_data(mode="all"):
+    gids = SHEET_GIDS.get(mode, SHEET_GIDS["all"])
+    combined_data = []
+    header = None
+    
+    for gid in gids:
+        csv_data = fetch_sheet_data(gid)
+        if not csv_data:
+            continue
+        f = io.StringIO(csv_data)
+        reader = csv.reader(f)
+        rows = list(reader)
+        if not rows:
+            continue
+        if not header:
+            header = rows[0]
+            combined_data.append(header)
+        # Добавляем строки данных без повтора заголовков
+        combined_data.extend(rows[1:])
+        
+    if not header:
+        return "Не удалось загрузить данные склада."
+        
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerows(combined_data)
+    return output.getvalue()
+
+# --- ВАШ ВЕБ-ИНТЕРФЕЙС СО ВСТРОЕННЫМ ГОЛОСОВЫМ ПОМОЩНИКОМ ---
+HTML_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Склад AI — Голосовой помощник</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f6f9;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+        }
+        .container {
+            width: 100%;
+            max-width: 700px;
+            background: #ffffff;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+        h2 { text-align: center; color: #333; margin-top: 0; }
+        #chat-box {
+            height: 420px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 15px;
+            overflow-y: auto;
+            background: #fafafa;
+            margin-bottom: 15px;
+            font-size: 14px;
+        }
+        .message {
+            margin-bottom: 12px;
+            padding: 10px 14px;
+            border-radius: 8px;
+            line-height: 1.4;
+            white-space: pre-wrap;
+        }
+        .message.user { background: #e3f2fd; text-align: right; }
+        .message.ai { background: #e8f5e9; text-align: left; }
+        .controls {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        input[type="text"] {
+            flex: 1;
+            padding: 12px;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            font-size: 16px;
+        }
+        button {
+            padding: 12px 18px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 16px;
+            color: #fff;
+            background: #007bff;
+            transition: background 0.2s;
+        }
+        button:hover { background: #0056b3; }
+        #mic-btn {
+            background: #28a745;
+            font-size: 18px;
+            padding: 12px 16px;
+        }
+        #mic-btn.recording {
+            background: #dc3545;
+            animation: pulse 1.5s infinite;
+        }
+        #voice-status {
+            font-size: 12px;
+            color: #666;
+            margin-top: 6px;
+            text-align: center;
+        }
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+            100% { transform: scale(1); }
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>📦 Склад AI — Управление складом</h2>
+    
+    <div id="chat-box">
+        <div class="message ai"><strong>Система:</strong><br>Привет! Задайте вопрос текстом или нажмите кнопку микрофона для голосового поиска.</div>
+    </div>
+    
+    <div id="voice-status">Готов к работе.</div>
+
+    <div class="controls" style="margin-top: 10px;">
+        <input type="text" id="user-input" placeholder="Введите наименование детали или артикул...">
+        <button id="mic-btn" title="Голосовой ввод">🎤</button>
+        <button id="send-btn">Найти</button>
+    </div>
+</div>
+
+<script>
+    const chatBox = document.getElementById('chat-box');
+    const userInput = document.getElementById('user-input');
+    const sendBtn = document.getElementById('send-btn');
+    const micBtn = document.getElementById('mic-btn');
+    const voiceStatus = document.getElementById('voice-status');
+
+    // Настройка Web Speech API (Распознавание речи)
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    let recognition = null;
+
+    if (SpeechRecognition) {
+        recognition = new SpeechRecognition();
+        recognition.lang = 'ru-RU';
+        recognition.interimResults = false;
+        recognition.maxAlternatives = 1;
+
+        recognition.onstart = () => {
+            voiceStatus.textContent = "🎤 Слушаю вас... Говорите запрос.";
+            micBtn.classList.add('recording');
+        };
+
+        recognition.onresult = (event) => {
+            const speechText = event.results[0][0].transcript;
+            userInput.value = speechText;
+            voiceStatus.textContent = `✅ Распознано: "${speechText}"`;
+            micBtn.classList.remove('recording');
+            sendMessage(); // Автоматическая отправка запроса после голоса
+        };
+
+        recognition.onerror = (event) => {
+            voiceStatus.textContent = `❌ Ошибка микрофона: ${event.error}`;
+            micBtn.classList.remove('recording');
+        };
+
+        recognition.onend = () => {
+            micBtn.classList.remove('recording');
+        };
+    } else {
+        voiceStatus.textContent = "⚠️ Голосовой ввод не поддерживается вашим браузером (рекомендуется Chrome).";
+        micBtn.style.display = 'none';
+    }
+
+    micBtn.addEventListener('click', () => {
+        if (recognition) {
+            try {
+                recognition.start();
+            } catch (e) {
+                console.error(e);
+            }
+        }
+    });
+
+    // Функция синтеза речи (Озвучка ответа бота)
+    function speakText(text) {
+        if ('speechSynthesis' in window) {
+            window.speechSynthesis.cancel();
+            const cleanText = text.replace(/<[^>]*>?/gm, ''); // Очистка от HTML-тегов
+            const utterance = new SpeechSynthesisUtterance(cleanText);
+            utterance.lang = 'ru-RU';
+            utterance.rate = 1.0;
+            window.speechSynthesis.speak(utterance);
+        }
+    }
+
+    // Отправка запроса на бэкенд
+    async function sendMessage() {
+        const text = userInput.value.trim();
+        if (!text) return;
+
+        appendMessage('Вы', text, 'user');
+        userInput.value = '';
+        voiceStatus.textContent = "Ищем данные...";
+
+        try {
+            const response = await fetch('/api/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message: text })
+            });
+            const data = await response.json();
+            
+            const reply = data.reply || "Нет ответа.";
+            appendMessage('Склад AI', reply, 'ai');
+            voiceStatus.textContent = "Готово.";
+            
+            // Озвучиваем ответ голосом
+            speakText(reply);
+        } catch (error) {
+            appendMessage('Система', 'Ошибка связи с сервером.', 'ai');
+            voiceStatus.textContent = "Ошибка сети.";
+        }
+    }
+
+    sendBtn.addEventListener('click', sendMessage);
+    userInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') sendMessage();
+    });
+
+    function appendMessage(sender, text, className) {
+        const div = document.createElement('div');
+        div.className = `message ${className}`;
+        div.innerHTML = `<strong>${sender}:</strong><br>${text}`;
+        chatBox.appendChild(div);
+        chatBox.scrollTop = chatBox.scrollHeight;
+    }
+</script>
+
+</body>
+</html>
+"""
+
+@app.route('/')
+def index():
+    return render_template_string(HTML_TEMPLATE)
+
+@app.route('/api/chat', methods=['POST'])
+def api_chat():
+    data = request.json
+    user_message = data.get('message', '')
+    
     token = get_gigachat_token()
     if not token:
-        return "Ошибка авторизации GigaChat."
-        
+        return {'reply': 'Ошибка авторизации в GigaChat API.'}
+
+    # Подтягиваем данные из Google Таблиц
+    warehouse_data = get_combined_warehouse_data("all")
+
     url = "https://gigachat.devices.sberbank.ru/api/v1/chat/completions"
+    payload = {
+        "model": "GigaChat",
+        "messages": [
+            {
+                "role": "system", 
+                "content": f"Ты помощник на складе. Вот актуальные данные из таблиц:\n{warehouse_data}\nОтвечай четко и по делу на основе этих данных."
+            },
+            {"role": "user", "content": user_message}
+        ],
+        "temperature": 0.3,
+        "stream": False
+    }
     headers = {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
         'Authorization': f'Bearer {token}'
     }
-    
-    wh_names = {"all": "Все базы", "sheet1": "Лист 1 (Основной)", "goods": "Лист «Товары»"}
-    selected_wh = wh_names.get(warehouse, "Все базы")
 
-    system_prompt = (
-        f"Ты голосовой складской помощник. База данных: '{selected_wh}'. "
-        "Ниже переданы данные из таблиц. Найди в них точное соответствие запросу пользователя или изображению. "
-        "Отвечай максимально кратко, разговорным языком (так как ответ будет зачитываться вслух голосом), без палочек (|) и технических символов. Называй наименование, артикул, место и статус."
-    )
-    
-    combined_context = sheet_context if sheet_context else ""
-    user_text = f"{combined_context}\nЗапрос пользователя: {prompt if prompt else 'Найди позицию по фото в базе данных.'}"
-
-    user_message = {"role": "user", "content": user_text}
-    if image_file_id:
-        user_message["attachments"] = [image_file_id]
-
-    payload = {
-        "model": "GigaChat",
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            user_message
-        ],
-        "temperature": 0.1,
-        "max_tokens": 400
-    }
-    
     try:
-        response = requests.post(url, headers=headers, json=payload, verify=False, timeout=25)
+        response = requests.post(url, headers=headers, json=payload, verify=False, timeout=20)
         res_data = response.json()
-        if 'choices' in res_data and len(res_data['choices']) > 0:
-            return res_data['choices'][0]['message']['content']
-        else:
-            return "Не удалось получить ответ от ИИ."
-    except requests.exceptions.Timeout:
-        return "Превышено время ожидания ответа. Попробуйте еще раз."
+        reply = res_data['choices'][0]['message']['content']
+        return {'reply': reply}
     except Exception as e:
-        return f"Ошибка запроса: {str(e)}"
-
-CHAT_TEMPLATE = """
-<!DOCTYPE html>
-<html lang="ru">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <link rel="manifest" href="/manifest.json">
-    <meta name="theme-color" content="#0f172a">
-    <title>Склад AI — Голосовой помощник</title>
-    <style>
-        :root {
-            --bg-primary: #0f172a;
-            --bg-secondary: #1e293b;
-            --accent: #38bdf8;
-            --accent-gradient: linear-gradient(135deg, #38bdf8 0%, #3b82f6 100%);
-            --text-main: #f8fafc;
-            --text-muted: #94a3b8;
-            --user-bubble: #1e3a8a;
-            --bot-bubble: #1e293b;
-            --border: #334155;
-            --red-glow: #ef4444;
-        }
-
-        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            background: var(--bg-primary); color: var(--text-main);
-            margin: 0; padding: 0; display: flex; flex-direction: column; height: 100vh;
-        }
-
-        header {
-            background: rgba(30, 41, 59, 0.95); backdrop-filter: blur(12px);
-            border-bottom: 1px solid var(--border); padding: 12px 16px;
-            display: flex; flex-direction: column; gap: 10px;
-            position: sticky; top: 0; z-index: 10;
-        }
-        .header-top { display: flex; align-items: center; justify-content: space-between; }
-        .logo-box { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 18px; }
-        .logo-icon {
-            width: 34px; height: 34px; background: var(--accent-gradient);
-            border-radius: 10px; display: flex; align-items: center; justify-content: center;
-            font-size: 18px; box-shadow: 0 0 12px rgba(56, 189, 248, 0.4);
-        }
-        
-        .controls-bar { display: flex; gap: 8px; width: 100%; }
-        select {
-            background: var(--bg-primary); color: var(--text-main);
-            border: 1px solid var(--border); border-radius: 10px;
-            padding: 8px 12px; font-size: 13px; outline: none; flex: 1;
-        }
-
-        #chat-container {
-            flex: 1; overflow-y: auto; padding: 16px;
-            display: flex; flex-direction: column; gap: 14px; scroll-behavior: smooth;
-        }
-
-        .message {
-            max-width: 88%; padding: 14px 18px; border-radius: 18px;
-            font-size: 15px; line-height: 1.5; word-break: break-word; white-space: pre-wrap;
-            animation: fadeIn 0.25s ease-out forwards;
-            display: flex; flex-direction: column; gap: 8px;
-        }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
-
-        .user {
-            background: var(--user-bubble); color: #fff; align-self: flex-end;
-            border-bottom-right-radius: 4px; border: 1px solid rgba(59, 130, 246, 0.4);
-        }
-        .bot {
-            background: var(--bot-bubble); color: var(--text-main); align-self: flex-start;
-            border-bottom-left-radius: 4px; border: 1px solid var(--border);
-            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
-        }
-
-        .tts-btn {
-            background: rgba(56, 189, 248, 0.1); border: 1px solid var(--border);
-            color: var(--accent); border-radius: 8px; padding: 4px 10px; font-size: 12px;
-            cursor: pointer; align-self: flex-start; display: flex; align-items: center; gap: 4px;
-        }
-        .tts-btn:active { background: rgba(56, 189, 248, 0.3); }
-
-        .quick-actions {
-            display: flex; gap: 8px; overflow-x: auto; padding: 8px 16px;
-            background: var(--bg-primary); border-top: 1px solid rgba(255,255,255,0.05);
-            scrollbar-width: none;
-        }
-        .quick-actions::-webkit-scrollbar { display: none; }
-        .chip {
-            background: var(--bg-secondary); color: var(--text-muted);
-            border: 1px solid var(--border); border-radius: 20px;
-            padding: 6px 14px; font-size: 13px; white-space: nowrap; cursor: pointer;
-            transition: all 0.2s;
-        }
-        .chip:active { background: var(--accent); color: #fff; transform: scale(0.95); }
-
-        .preview-area {
-            display: none; padding: 8px 16px; background: var(--bg-secondary);
-            border-top: 1px solid var(--border); align-items: center; gap: 12px;
-        }
-        .preview-img { width: 50px; height: 50px; border-radius: 8px; object-fit: cover; border: 1px solid var(--accent); }
-        .remove-img { color: #ef4444; font-weight: bold; cursor: pointer; font-size: 14px; }
-
-        #input-form {
-            background: var(--bg-secondary); padding: 10px 14px;
-            display: flex; gap: 8px; align-items: center; border-top: 1px solid var(--border);
-        }
-        .icon-btn {
-            background: rgba(255,255,255,0.05); border: 1px solid var(--border);
-            border-radius: 12px; width: 44px; height: 44px;
-            display: flex; align-items: center; justify-content: center;
-            cursor: pointer; font-size: 20px; color: var(--text-main); transition: 0.2s; flex-shrink: 0;
-        }
-        .icon-btn:active { transform: scale(0.92); background: rgba(255,255,255,0.1); }
-        
-        #micBtn.listening {
-            background: var(--red-glow); border-color: #f87171;
-            animation: micPulse 1.2s infinite;
-        }
-        @keyframes micPulse { 0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); } 70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); } 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); } }
-
-        input[type="file"] { display: none; }
-
-        input[type="text"] {
-            flex: 1; background: var(--bg-primary); border: 1px solid var(--border);
-            color: #fff; padding: 12px 16px; border-radius: 14px; outline: none; font-size: 15px;
-        }
-        input[type="text"]:focus { border-color: var(--accent); }
-
-        .send-btn {
-            background: var(--accent-gradient); border: none; color: white;
-            border-radius: 14px; width: 44px; height: 44px; font-size: 18px;
-            display: flex; align-items: center; justify-content: center; cursor: pointer;
-            box-shadow: 0 0 10px rgba(56, 189, 248, 0.3); flex-shrink: 0;
-        }
-        .send-btn:active { transform: scale(0.92); }
-
-        .loading-pulse { display: inline-block; animation: pulse 1.5s infinite; color: var(--accent); }
-        @keyframes pulse { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
-    </style>
-</head>
-<body>
-
-    <header>
-        <div class="header-top">
-            <div class="logo-box">
-                <div class="logo-icon">🎙️</div>
-                <span>Склад AI (Голос)</span>
-            </div>
-            <span style="font-size: 12px; color: #4ade80;">● Онлайн</span>
-        </div>
-        <div class="controls-bar">
-            <select id="warehouseSelect">
-                <option value="all">🏢 Все базы вместе</option>
-                <option value="sheet1">📋 Лист 1 (Основной)</option>
-                <option value="goods">🏷️ Лист «Товары»</option>
-            </select>
-            <select id="modeSelect">
-                <option value="search">🔎 Поиск</option>
-                <option value="scan">📷 Сканер шильдиков</option>
-                <option value="analog">🛠️ Аналоги</option>
-            </select>
-        </div>
-    </header>
-
-    <div id="chat-container">
-        <div class="message bot">
-            👋 Приветствую! Нажмите на значок микрофона (🎤), чтобы сделать голосовой запрос, или введите текст.
-        </div>
-    </div>
-
-    <div class="quick-actions">
-        <div class="chip" onclick="quickSend('Диодный мост')">🔍 Диодный мост</div>
-        <div class="chip" onclick="quickSend('Захват кег')">📦 Захват кег</div>
-        <div class="chip" onclick="quickSend('Рольганг')">⚙️ Рольганг</div>
-    </div>
-
-    <div class="preview-area" id="previewArea">
-        <img id="previewImage" class="preview-img" src="" alt="preview">
-        <span style="font-size: 13px; color: var(--text-muted);">Фото прикреплено</span>
-        <span class="remove-img" onclick="clearImage()">Удалить</span>
-    </div>
-
-    <form id="input-form" onsubmit="sendMessage(event)">
-        <label class="icon-btn" title="Сделать фото">
-            📷 <input type="file" id="imageInput" accept="image/*" onchange="handleImageSelect(event)">
-        </label>
-        <div class="icon-btn" id="micBtn" title="Говорить голосом" onclick="toggleSpeechRecognition()">🎤</div>
-        <input type="text" id="messageInput" placeholder="Артикул, название или голос..." autocomplete="off">
-        <button type="submit" class="send-btn">➔</button>
-    </form>
-
-    <script>
-        if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('/sw.js');
-        }
-
-        let recognition = null;
-        let isListening = false;
-
-        if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
-            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-            recognition = new SpeechRecognition();
-            recognition.lang = 'ru-RU';
-            recognition.interimResults = false;
-            recognition.maxAlternatives = 1;
-
-            recognition.onstart = function() {
-                isListening = true;
-                document.getElementById('micBtn').classList.add('listening');
-                document.getElementById('messageInput').placeholder = "Слушаю вас...";
-            };
-
-            recognition.onresult = function(event) {
-                const speechResult = event.results[0][0].transcript;
-                document.getElementById('messageInput').value = speechResult;
-                stopSpeechRecognition();
-                sendMessage(new Event('submit'));
-            };
-
-            recognition.onerror = function(event) {
-                stopSpeechRecognition();
-            };
-
-            recognition.onend = function() {
-                stopSpeechRecognition();
-            };
-        }
-
-        function toggleSpeechRecognition() {
-            if (!recognition) {
-                alert("Ваш браузер не поддерживает голосовой ввод. Попробуйте Google Chrome.");
-                return;
-            }
-            if (isListening) {
-                recognition.stop();
-            } else {
-                recognition.start();
-            }
-        }
-
-        function stopSpeechRecognition() {
-            isListening = false;
-            document.getElementById('micBtn').classList.remove('listening');
-            document.getElementById('messageInput').placeholder = "Артикул, название или голос...";
-        }
-
-        function speakText(text) {
-            if ('speechSynthesis' in window) {
-                window.speechSynthesis.cancel(); // Остановка предыдущей озвучки
-                const utterance = new SpeechSynthesisUtterance(text);
-                utterance.lang = 'ru-RU';
-                utterance.rate = 1.0; // Скорость речи
-                window.speechSynthesis.speak(utterance);
-            }
-        }
-
-        function handleImageSelect(e) {
-            const file = e.target.files[0];
-            if (file) {
-                const reader = new FileReader();
-                reader.onload = function(evt) {
-                    document.getElementById('previewImage').src = evt.target.result;
-                    document.getElementById('previewArea').style.display = 'flex';
-                }
-                reader.readAsDataURL(file);
-            }
-        }
-
-        function clearImage() {
-            document.getElementById('imageInput').value = '';
-            document.getElementById('previewArea').style.display = 'none';
-        }
-
-        function quickSend(text) {
-            document.getElementById('messageInput').value = text;
-            sendMessage(new Event('submit'));
-        }
-
-        async function sendMessage(e) {
-            e.preventDefault();
-            const msgInput = document.getElementById('messageInput');
-            const imgInput = document.getElementById('imageInput');
-            const warehouse = document.getElementById('warehouseSelect').value;
-            const container = document.getElementById('chat-container');
-
-            const text = msgInput.value.trim();
-            const files = imgInput.files;
-
-            if (!text && files.length === 0) return;
-
-            const userDiv = document.createElement('div');
-            userDiv.className = 'message user';
-            userDiv.innerText = text + (files.length > 0 ? " [📷 Фото]" : "");
-            container.appendChild(userDiv);
-
-            const formData = new FormData();
-            formData.append('text', text);
-            formData.append('warehouse', warehouse);
-
-            if (files.length > 0) {
-                formData.append('image', files[0]);
-            }
-
-            msgInput.value = '';
-            clearImage();
-            container.scrollTop = container.scrollHeight;
-
-            const loadDiv = document.createElement('div');
-            loadDiv.className = 'message bot';
-            loadDiv.innerHTML = '<span class="loading-pulse">⚡ Ищу в базе...</span>';
-            container.appendChild(loadDiv);
-            container.scrollTop = container.scrollHeight;
-
-            try {
-                const response = await fetch('/api/chat', { method: 'POST', body: formData });
-                const data = await response.json();
-                
-                loadDiv.remove();
-
-                const botDiv = document.createElement('div');
-                botDiv.className = 'message bot';
-                
-                const textNode = document.createElement('div');
-                textNode.innerText = data.reply;
-                botDiv.appendChild(textNode);
-
-                // Кнопка для повторного озвучивания голосом
-                const speakBtn = document.createElement('button');
-                speakBtn.className = 'tts-btn';
-                speakBtn.innerHTML = '🔊 Прослушать голосом';
-                speakBtn.onclick = () => speakText(data.reply);
-                botDiv.appendChild(speakBtn);
-
-                container.appendChild(botDiv);
-
-                // Автоматически озвучиваем ответ голосом
-                speakText(data.reply);
-
-            } catch (err) {
-                loadDiv.remove();
-                const errDiv = document.createElement('div');
-                errDiv.className = 'message bot';
-                errDiv.innerText = '⚠️ Ошибка связи с сервером.';
-                container.appendChild(errDiv);
-            }
-            container.scrollTop = container.scrollHeight;
-        }
-    </script>
-</body>
-</html>
-"""
-
-MANIFEST_JSON = """{
-  "name": "Склад AI",
-  "short_name": "Склад AI",
-  "start_url": "/",
-  "display": "standalone",
-  "background_color": "#0f172a",
-  "theme_color": "#0f172a",
-  "icons": [
-    {
-      "src": "https://cdn-icons-png.flaticon.com/512/3061/3061341.png",
-      "sizes": "512x512",
-      "type": "image/png"
-    }
-  ]
-}"""
-
-SERVICE_WORKER_JS = """
-self.addEventListener('install', (e) => { self.skipWaiting(); });
-self.addEventListener('fetch', (e) => { e.respondWith(fetch(e.request)); });
-"""
-
-@app.route('/')
-def index():
-    return render_template_string(CHAT_TEMPLATE)
-
-@app.route('/manifest.json')
-def manifest():
-    return Response(MANIFEST_JSON, mimetype='application/json')
-
-@app.route('/sw.js')
-def service_worker():
-    return Response(SERVICE_WORKER_JS, mimetype='application/javascript')
-
-@app.route('/api/chat', methods=['POST'])
-def api_chat():
-    text = request.form.get('text', '')
-    warehouse = request.form.get('warehouse', 'all')
-    image_file_id = None
-
-    if 'image' in request.files:
-        img_file = request.files['image']
-        if img_file.filename != '':
-            img_bytes = img_file.read()
-            token = get_gigachat_token()
-            if token:
-                image_file_id = upload_image_to_gigachat(token, img_bytes)
-
-    sheet_data = search_in_sheet(text, warehouse)
-    reply_text = ask_gigachat(text, sheet_data, image_file_id, warehouse)
-    return {'reply': reply_text}
+        return {'reply': f'Ошибка обращения к GigaChat: {str(e)}'}
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=10000)
+    app.run(host='0.0.0.0', port=5000, debug=True)
