@@ -21,7 +21,6 @@
 
     <!-- Chat Container -->
     <main class="max-w-4xl w-full mx-auto p-4 flex-1 flex flex-col space-y-4 overflow-y-auto my-4" id="chat-box">
-        <!-- Приветственное сообщение -->
         <div class="flex items-start space-x-3">
             <div class="bg-indigo-600 text-white rounded-2xl p-4 max-w-xl shadow-lg">
                 <p class="font-medium">Привет! Я твой ИИ-помощник по складу. Спроси меня о наличии деталей, артикулах или остатках на основе таблиц.</p>
@@ -59,8 +58,6 @@
             
             const bubble = document.createElement('div');
             bubble.className = `rounded-2xl p-4 max-w-xl shadow-lg ${isUser ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-100 border border-slate-700'}`;
-            
-            // Преобразуем переносы строк в блек-тексте
             bubble.innerHTML = `<p class="whitespace-pre-wrap font-medium">${text}</p>`;
             wrapper.appendChild(bubble);
             chatBox.appendChild(wrapper);
@@ -74,7 +71,6 @@
             appendMessage('user', text);
             userInput.value = '';
 
-            // Индикатор загрузки
             const loadingId = 'loading-' + Date.now();
             const loadingWrapper = document.createElement('div');
             loadingWrapper.id = loadingId;
