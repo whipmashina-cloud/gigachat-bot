@@ -93,7 +93,7 @@ def api_chat():
 
     token = get_gigachat_token()
     if not token:
-        return jsonify({'reply': 'Ошибка авторизации в GigaChat API (не удалось получить токен). Проверьте ключ GIGACHAT_AUTH_KEY в настройках Render.'})
+        return jsonify({'reply': 'Ошибка авторизации в GigaChat API (не удалось получить токен). Проверьте правильность ключа GIGACHAT_AUTH_KEY в настройках Render.'})
 
     warehouse_data = get_combined_warehouse_data("all")
 
