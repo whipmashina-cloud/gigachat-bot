@@ -1,4 +1,3 @@
 Flask
 requests
 urllib3
-gigachat
