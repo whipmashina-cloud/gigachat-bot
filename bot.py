@@ -4,10 +4,8 @@ import io
 import requests
 import urllib3
 from flask import Flask, request, jsonify, render_template
-from gigachat import GigaChat
-from gigachat.models import Chat, Messages, MessagesRole
 
-# Отключаем предупреждения о сертификатах
+# Отключаем предупреждения о самоподписанных сертификатах Сбера
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 app = Flask(__name__)
@@ -20,6 +18,28 @@ SHEET_GIDS = {
     "sheet1": ["0", "1433962862"],
     "goods": ["1202844813"]
 }
+
+def get_gigachat_token():
+    print("=== НАЧАЛО ЗАПРОСА ТОКЕНА GIGACHAT ===")
+    url = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
+    payload = {'scope': 'GIGACHAT_API_PERS'}
+    headers = {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Accept': 'application/json',
+        'RQUID': '6f002237-3318-48b6-86716d006324',
+        'Authorization': f'Basic {GIGACHAT_AUTH_KEY}'
+    }
+    
+    try:
+        response = requests.post(url, headers=headers, data=payload, verify=False, timeout=15)
+        print(f"Token status code: {response.status_code}")
+        print(f"Token response text: {response.text}")
+        if response.status_code == 200:
+            return response.json().get('access_token')
+    except Exception as e:
+        print(f"КРИТИЧЕСКАЯ ОШИБКА запроса токена: {e}")
+    print("=== КОНЕЦ ЗАПРОСА ТОКЕНА ===")
+    return None
 
 def fetch_sheet_data(gid):
     url = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/export?format=csv&gid={gid}"
@@ -70,34 +90,40 @@ def api_chat():
     if not user_message:
         return jsonify({'reply': 'Пустое сообщение.'}), 400
 
+    token = get_gigachat_token()
+    if not token:
+        return jsonify({'reply': 'Ошибка авторизации в GigaChat API (не удалось получить токен). Проверьте ключ GIGACHAT_AUTH_KEY в настройках Render.'})
+
     warehouse_data = get_combined_warehouse_data("all")
 
-    try:
-        # Используем официальный SDK GigaChat с продвинутой моделью
-        with GigaChat(
-            credentials=GIGACHAT_AUTH_KEY,
-            scope="GIGACHAT_API_PERS",
-            verify_ssl_certs=False,
-            model="GigaChat-Pro"  # Можно заменить на "GigaChat" или "GigaChat-Max"
-        ) as giga:
-            
-            payload = Chat(
-                messages=[
-                    Messages(
-                        role=MessagesRole.SYSTEM, 
-                        content=f"Ты профессиональный помощник на складе. Вот актуальные данные из таблиц учета:\n{warehouse_data}\nОтвечай четко, по делу и опирайся строго на эти данные."
-                    ),
-                    Messages(role=MessagesRole.USER, content=user_message)
-                ],
-                temperature=0.3
-            )
-            
-            response = giga.chat(payload)
-            reply = response.choices[0].message.content
-            return jsonify({'reply': reply})
+    # Шаг 2 по инструкции Сбера: отправка запроса с Access token в Bearer
+    url = "https://gigachat.devices.sberbank.ru/api/v1/chat/completions"
+    payload = {
+        "model": "GigaChat",
+        "messages": [
+            {
+                "role": "system", 
+                "content": f"Ты профессиональный помощник на складе. Вот актуальные данные из таблиц учета:\n{warehouse_data}\nОтвечай четко, по делу и опирайся строго на эти данные."
+            },
+            {"role": "user", "content": user_message}
+        ],
+        "temperature": 0.3,
+        "stream": False
+    }
+    headers = {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'Authorization': f'Bearer {token}'
+    }
 
+    try:
+        response = requests.post(url, headers=headers, json=payload, verify=False, timeout=20)
+        print(f"Chat status code: {response.status_code}")
+        res_data = response.json()
+        reply = res_data['choices'][0]['message']['content']
+        return jsonify({'reply': reply})
     except Exception as e:
-        print(f"GigaChat SDK error: {str(e)}")
+        print(f"Chat error: {str(e)}")
         return jsonify({'reply': f'Ошибка обращения к GigaChat: {str(e)}'})
 
 if __name__ == '__main__':
