@@ -97,8 +97,8 @@ def api_chat():
 
     warehouse_data = get_combined_warehouse_data("all")
 
-    # Точный запрос по вашему скриншоту с моделью GigaChat-3-Ultra
-    url = "https://gigachat.devices.sberbank.ru/api/v1/chat/completions"
+    # Генерация через GigaChat API с моделью GigaChat-3-Ultra
+    url = "https://api.giga.chat/v1/chat/completions"
     payload = json.dumps({
         "model": "GigaChat-3-Ultra",
         "messages": [
