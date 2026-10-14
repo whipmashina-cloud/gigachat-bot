@@ -80,7 +80,7 @@ def get_combined_warehouse_data(mode="all"):
 
 @app.route('/')
 def index():
-    return "Sklad AI API is running. Send POST request to /api/chat with JSON {'message': 'ваш запрос'}"
+    return "Sklad AI API is running."
 
 @app.route('/api/chat', methods=['POST'])
 def api_chat():
