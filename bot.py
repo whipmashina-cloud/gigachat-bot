@@ -3,7 +3,7 @@ import csv
 import io
 import requests
 import urllib3
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, render_template
 
 # Отключаем предупреждения о самоподписанных сертификатах Сбера
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -80,7 +80,7 @@ def get_combined_warehouse_data(mode="all"):
 
 @app.route('/')
 def index():
-    return "Sklad AI API is running."
+    return render_template('index.html')
 
 @app.route('/api/chat', methods=['POST'])
 def api_chat():
