@@ -3,12 +3,10 @@ import csv
 import io
 import requests
 import urllib3
+from flask import Flask, request, render_template, Response
 
 # Отключаем предупреждения о самоподписанных сертификатах Сбера
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
-app = Flask(__name__) if 'Flask' in globals() else None # страховка для импорта
-from flask import Flask, request, render_template, Response
 
 app = Flask(__name__)
 
@@ -31,13 +29,14 @@ def get_gigachat_token():
         'Authorization': f'Basic {GIGACHAT_AUTH_KEY}'
     }
     try:
+        print("Sending request for GigaChat token...")
         response = requests.post(url, headers=headers, data=payload, verify=False, timeout=10)
         print(f"Token status code: {response.status_code}")
-        print(f"Token response: {response.text}")
+        print(f"Token response text: {response.text}")
         if response.status_code == 200:
             return response.json().get('access_token')
     except Exception as e:
-        print(f"Error getting token: {e}")
+        print(f"Error getting token exception: {e}")
     return None
 
 def fetch_sheet_data(gid):
@@ -113,7 +112,6 @@ def api_chat():
 
     try:
         response = requests.post(url, headers=headers, json=payload, verify=False, timeout=20)
-        print(f"Chat status code: {response.status_code}")
         res_data = response.json()
         reply = res_data['choices'][0]['message']['content']
         return {'reply': reply}
