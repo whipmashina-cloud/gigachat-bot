@@ -1,6 +1,7 @@
 import os
 import csv
 import io
+import json
 import requests
 import urllib3
 from flask import Flask, request, jsonify, render_template
@@ -22,7 +23,7 @@ SHEET_GIDS = {
 def get_gigachat_token():
     print("=== НАЧАЛО ЗАПРОСА ТОКЕНА GIGACHAT ===")
     url = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
-    payload = {'scope': 'GIGACHAT_API_PERS'}
+    payload = 'scope=GIGACHAT_API_PERS'
     headers = {
         'Content-Type': 'application/x-www-form-urlencoded',
         'Accept': 'application/json',
@@ -96,10 +97,10 @@ def api_chat():
 
     warehouse_data = get_combined_warehouse_data("all")
 
-    # Шаг 2 по инструкции Сбера: отправка запроса с Access token в Bearer
+    # Точный запрос по вашему скриншоту с моделью GigaChat-3-Ultra
     url = "https://gigachat.devices.sberbank.ru/api/v1/chat/completions"
-    payload = {
-        "model": "GigaChat",
+    payload = json.dumps({
+        "model": "GigaChat-3-Ultra",
         "messages": [
             {
                 "role": "system", 
@@ -108,8 +109,8 @@ def api_chat():
             {"role": "user", "content": user_message}
         ],
         "temperature": 0.3,
-        "stream": False
-    }
+        "profanity_check": True
+    })
     headers = {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
@@ -117,7 +118,7 @@ def api_chat():
     }
 
     try:
-        response = requests.post(url, headers=headers, json=payload, verify=False, timeout=20)
+        response = requests.post(url, headers=headers, data=payload, verify=False, timeout=20)
         print(f"Chat status code: {response.status_code}")
         res_data = response.json()
         reply = res_data['choices'][0]['message']['content']
