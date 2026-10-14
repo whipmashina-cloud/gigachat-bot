@@ -2,6 +2,12 @@ import os
 import csv
 import io
 import requests
+import urllib3
+
+# Отключаем предупреждения о самоподписанных сертификатах Сбера
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+app = Flask(__name__) if 'Flask' in globals() else None # страховка для импорта
 from flask import Flask, request, render_template, Response
 
 app = Flask(__name__)
@@ -22,14 +28,17 @@ def get_gigachat_token():
         'Content-Type': 'application/x-www-form-urlencoded',
         'Accept': 'application/json',
         'RQUID': '6f002237-3318-48b6-86716d006324',
-        'Authorization': f'Bearer {GIGACHAT_AUTH_KEY}'
+        'Authorization': f'Basic {GIGACHAT_AUTH_KEY}'
     }
     try:
         response = requests.post(url, headers=headers, data=payload, verify=False, timeout=10)
-        return response.json().get('access_token')
+        print(f"Token status code: {response.status_code}")
+        print(f"Token response: {response.text}")
+        if response.status_code == 200:
+            return response.json().get('access_token')
     except Exception as e:
         print(f"Error getting token: {e}")
-        return None
+    return None
 
 def fetch_sheet_data(gid):
     url = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/export?format=csv&gid={gid}"
@@ -79,7 +88,7 @@ def api_chat():
     
     token = get_gigachat_token()
     if not token:
-        return {'reply': 'Ошибка авторизации в GigaChat API.'}
+        return {'reply': 'Ошибка авторизации в GigaChat API (не удалось получить токен). Проверьте ключ GIGACHAT_AUTH_KEY.'}
 
     warehouse_data = get_combined_warehouse_data("all")
 
@@ -104,10 +113,12 @@ def api_chat():
 
     try:
         response = requests.post(url, headers=headers, json=payload, verify=False, timeout=20)
+        print(f"Chat status code: {response.status_code}")
         res_data = response.json()
         reply = res_data['choices'][0]['message']['content']
         return {'reply': reply}
     except Exception as e:
+        print(f"Chat error: {str(e)}")
         return {'reply': f'Ошибка обращения к GigaChat: {str(e)}'}
 
 if __name__ == '__main__':
