@@ -6,11 +6,10 @@ import time
 import uuid
 import requests
 
-# --- РЕШЕНИЕ ПРОБЛЕМЫ С SSL ---
-# Указываем библиотеке requests использовать файл cacert.pem
-# для проверки сертификатов. Файл должен лежать рядом со скриптом.
-os.environ['REQUESTS_CA_BUNDLE'] = os.path.join(os.path.dirname(__file__), 'cacert.pem')
-# --- КОНЕЦ РЕШЕНИЯ ---
+# --- Путь к файлу сертификатов ---
+# Получаем абсолютный путь к файлу cacert.pem, который лежит рядом со скриптом.
+CERT_FILE_PATH = os.path.join(os.path.dirname(__file__), 'cacert.pem')
+# --- Конец настройки ---
 
 import urllib3
 from flask import Flask, request, jsonify, render_template
@@ -26,25 +25,20 @@ SPREADSHEET_ID = os.environ.get("SPREADSHEET_ID", "115oOjWSwkFUuZnBomimcbvPsf_c6
 
 # Настройки GID листов
 SHEET_GIDS = {
-    "all": ["1202844813"],   # ID листа goods
+    "all": ["1202844813"],
     "goods": ["1202844813"]
 }
 
 # --- ПАРАМЕТРЫ КЭШИРОВАНИЯ И ТАЙМАУТОВ ---
-CACHE_TIMEOUT = 300  # Время жизни кэша в секундах (5 минут)
-GIGACHAT_TOKEN_TIMEOUT = 15  # Таймаут на запрос токена
-SHEET_FETCH_TIMEOUT = 20     # Таймаут на запрос к Google Таблице
-GIGACHAT_API_TIMEOUT = 25    # Таймаут на запрос к GigaChat API
+CACHE_TIMEOUT = 300
+GIGACHAT_TOKEN_TIMEOUT = 15
+SHEET_FETCH_TIMEOUT = 20
+GIGACHAT_API_TIMEOUT = 25
 
-# Кэш для данных склада
 DATA_CACHE = {"data": None, "timestamp": 0}
 
 
 def get_gigachat_token():
-    """
-    Получает токен для авторизации в GigaChat API.
-    ВНИМАНИЕ: verify=False используется ТОЛЬКО для внутреннего API Сбера.
-    """
     print("=== НАЧАЛО ЗАПРОСА ТОКЕНА GIGACHAT ===")
     url = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
     payload = 'scope=GIGACHAT_API_PERS'
@@ -56,7 +50,7 @@ def get_gigachat_token():
     }
     
     try:
-        # Отключаем SSL проверку только для этого внутреннего адреса
+        # Для Сбер ID используем verify=False
         response = requests.post(url, headers=headers, data=payload, verify=False, timeout=GIGACHAT_TOKEN_TIMEOUT)
         print(f"Token status code: {response.status_code}")
         if response.status_code == 200:
@@ -70,12 +64,10 @@ def get_gigachat_token():
 
 
 def fetch_sheet_data(gid):
-    """
-    Загружает данные из Google Sheet по GID в формате CSV.
-    """
     url = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/export?format=csv&gid={gid}"
     try:
-        response = requests.get(url, timeout=SHEET_FETCH_TIMEOUT)
+        # Для Google Sheets используем наш файл сертификатов
+        response = requests.get(url, timeout=SHEET_FETCH_TIMEOUT, verify=CERT_FILE_PATH)
         if response.status_code == 200:
             return response.content.decode('utf-8')
         else:
@@ -86,13 +78,7 @@ def fetch_sheet_data(gid):
 
 
 def get_combined_warehouse_data(mode="all"):
-    """
-    Собирает данные со всех листов, используя кэш.
-    Если не удается обновить данные, возвращает старые из кэша.
-    """
     current_time = time.time()
-    
-    # 1. Если кэш валиден, возвращаем его
     if DATA_CACHE["data"] and (current_time - DATA_CACHE["timestamp"] < CACHE_TIMEOUT):
         return DATA_CACHE["data"]
 
@@ -105,7 +91,6 @@ def get_combined_warehouse_data(mode="all"):
     for gid in gids:
         csv_data = fetch_sheet_data(gid)
         if not csv_data:
-            print(f"Warning: Failed to fetch data for gid {gid}. Skipping.")
             continue
             
         f = io.StringIO(csv_data)
@@ -120,21 +105,16 @@ def get_combined_warehouse_data(mode="all"):
             
         combined_data.extend(rows[1:])
         
-    # 2. Если не удалось собрать данные (даже без заголовка)
     if not header:
-        print("CRITICAL: Failed to fetch any data from sheets.")
-        # Возвращаем старый кэш, если он был, иначе сообщение об ошибке
         if DATA_CACHE["data"]:
             return DATA_CACHE["data"]
         return "Не удалось загрузить данные склада."
         
-    # Собираем итоговый CSV
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerows(combined_data)
     result = output.getvalue()
 
-    # 3. ТОЛЬКО если всё успешно, обновляем кэш
     DATA_CACHE["data"] = result
     DATA_CACHE["timestamp"] = current_time
     print("Данные склада успешно обновлены в кэше.")
@@ -183,8 +163,11 @@ def api_chat():
     }
 
     try:
-        # Теперь этот запрос будет использовать cacert.pem и пройдёт проверку SSL
-        response = requests.post(url, headers=headers, data=payload, timeout=GIGACHAT_API_TIMEOUT)
+        # --- ГЛАВНОЕ ИЗМЕНЕНИЕ ЗДЕСЬ ---
+        # Явно указываем путь к файлу сертификатов для запроса к GigaChat
+        response = requests.post(url, headers=headers, data=payload, timeout=GIGACHAT_API_TIMEOUT, verify=CERT_FILE_PATH)
+        # --- ---
+        
         print(f"Chat status code: {response.status_code}")
         res_data = response.json()
         
