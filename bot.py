@@ -16,9 +16,9 @@ app = Flask(__name__)
 GIGACHAT_AUTH_KEY = os.environ.get("GIGACHAT_AUTH_KEY")
 SPREADSHEET_ID = os.environ.get("SPREADSHEET_ID", "115oOjWSwkFUuZnBomimcbvPsf_c6cyqmbgrFwyFSVE")
 
+# Настройки GID листов (лист_1 отключен, считывается только лист goods)
 SHEET_GIDS = {
-    "all": ["0", "1433962862", "1202844813"],
-    "sheet1": ["0", "1433962862"],
+    "all": ["1202844813"],   # Только ID листа goods
     "goods": ["1202844813"]
 }
 
@@ -61,7 +61,7 @@ def fetch_sheet_data(gid):
 
 def get_combined_warehouse_data(mode="all"):
     current_time = time.time()
-    # Если кэш валиден, возвращаем его (снижаем нагрузку на Google Docs)
+    # Если кэш валиден, возвращаем его (снижаем нагрузку на Google Таблицу)
     if DATA_CACHE["data"] and (current_time - DATA_CACHE["timestamp"] < CACHE_TIMEOUT):
         return DATA_CACHE["data"]
 
