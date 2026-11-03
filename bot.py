@@ -5,11 +5,17 @@ import json
 import time
 import uuid
 import requests
+
+# --- РЕШЕНИЕ ПРОБЛЕМЫ С SSL ---
+# Указываем библиотеке requests использовать файл cacert.pem
+# для проверки сертификатов. Файл должен лежать рядом со скриптом.
+os.environ['REQUESTS_CA_BUNDLE'] = os.path.join(os.path.dirname(__file__), 'cacert.pem')
+# --- КОНЕЦ РЕШЕНИЯ ---
+
 import urllib3
 from flask import Flask, request, jsonify, render_template
 
-# --- НАСТРОЙКИ ---
-# Отключаем предупреждения urllib3, так как для Сбер ID будем отключать проверку SSL
+# Отключаем предупреждения urllib3 для внутреннего API Сбера
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 app = Flask(__name__)
@@ -45,7 +51,6 @@ def get_gigachat_token():
     headers = {
         'Content-Type': 'application/x-www-form-urlencoded',
         'Accept': 'application/json',
-        # Генерируем уникальный ID для каждого запроса
         'RQUID': str(uuid.uuid4()),
         'Authorization': f'Basic {GIGACHAT_AUTH_KEY}'
     }
@@ -178,7 +183,7 @@ def api_chat():
     }
 
     try:
-        # Здесь verify=True по умолчанию, что БЕЗОПАСНО
+        # Теперь этот запрос будет использовать cacert.pem и пройдёт проверку SSL
         response = requests.post(url, headers=headers, data=payload, timeout=GIGACHAT_API_TIMEOUT)
         print(f"Chat status code: {response.status_code}")
         res_data = response.json()
@@ -198,5 +203,4 @@ def api_chat():
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
-    # debug=True лучше выключать на боевом сервере
     app.run(host='0.0.0.0', port=port, debug=False) 
